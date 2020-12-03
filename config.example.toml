@@ -3,5 +3,5 @@ user="efureev"
 password=""
 host = "localhost"
 port = 5432
-name = "loogger"
+name = "db-name"
 migrationsPath = "./migrations"
