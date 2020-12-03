@@ -15,8 +15,7 @@ func MigrateCreate(migrationNameFile *string) func() {
 	return func() {
 		log.Println(`creating migration...`)
 
-		if migrationNameFile == nil {
-			// migrationNameFile = ``
+		if *migrationNameFile == `` {
 			log.Fatal(`не указано имя файла миграции`)
 		}
 

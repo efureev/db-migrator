@@ -2,6 +2,7 @@ package db
 
 import (
 	"log"
+	"os"
 
 	"github.com/golang-migrate/migrate/v4"
 )
@@ -16,7 +17,12 @@ func MigrateUp() {
 	case migrate.ErrNoChange:
 		log.Println(`[DB] ` + err.Error())
 		return
+
 	case migrate.ErrNilVersion:
+		log.Println(`[DB] ` + err.Error())
+		return
+
+	case err.(*os.PathError):
 		log.Println(`[DB] ` + err.Error())
 		return
 	}
