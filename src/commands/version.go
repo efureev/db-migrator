@@ -5,7 +5,9 @@ import (
 )
 
 var version = "unknown"
+var build = "unknown"
+var buildTime = "unknown"
 
 func getVersion() {
-	flaggy.SetVersion(version)
+	flaggy.SetVersion(version + ` (` + build + `). Compiling: ` + buildTime)
 }
