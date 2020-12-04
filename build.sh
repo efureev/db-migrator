@@ -3,7 +3,7 @@
 BUILD_PATH="build"
 APP_NAME="migrator"
 VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
-VERSION_TAG=$(git tag)
+VERSION_TAG=$(git describe --tags)
 
 # for OS in darwin linux ;
 for OS in darwin ;
