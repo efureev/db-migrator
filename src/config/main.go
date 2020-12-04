@@ -44,6 +44,10 @@ func Init() {
 	if err != nil {
 		log.Fatalf("unable to decode into struct, %v", err)
 	}
+
+	if c.Database.MigrationsPath == `` {
+		c.Database.MigrationsPath = `./migrations`
+	}
 }
 
 func Get() *Config {
