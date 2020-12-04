@@ -17,7 +17,8 @@ Binary file to help you manage migrations into your DB.
 
 ## Examples
 ```
-`$ ./migrator create -n file_name`
-`$ ./migrator up`
-`$ MGTR_DATABASE_MIGRATIONPATH=./custom ./migrator up`
+$ ./migrator create -n file_name
+$ ./migrator create --name='create users table'
+$ ./migrator up
+$ MGTR_DATABASE_MIGRATIONPATH=./custom ./migrator up
 ```
