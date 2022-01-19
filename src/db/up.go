@@ -13,6 +13,11 @@ func MigrateUp() {
 
 	err := migrateManager().Up()
 
+	if err == nil {
+		log.Println(`migrated up done`)
+		return
+	}
+
 	switch err {
 	case migrate.ErrNoChange:
 		log.Println(`[DB] ` + err.Error())
@@ -27,7 +32,5 @@ func MigrateUp() {
 		return
 	}
 
-	failError(err, "Ошибка наката миграций")
-
-	log.Println(`migrated up done`)
+	log.Fatalf("[DB]\t%s: %s", "Ошибка наката миграций", err)
 }

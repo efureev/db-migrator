@@ -5,8 +5,8 @@ APP_NAME="migrator"
 VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
 VERSION_TAG=$(git describe --abbrev=0 --tags)
 
-# for OS in darwin linux ;
-for OS in darwin ;
+for OS in darwin linux ;
+# for OS in darwin ;
 do
     for ARCH in amd64 ;
         do
@@ -23,7 +23,7 @@ do
                 -X 'migrator/src/commands.buildTime=$(date)' \
                 " \
                  -o $BUILD_PATH/$APP_NAME.$OS.$ARCHX ;
-            
+
         done
 done
 echo ""
