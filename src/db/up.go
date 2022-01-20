@@ -18,6 +18,16 @@ func MigrateUp() {
 		return
 	}
 
+	if e, ok := err.(migrate.ErrDirty); ok {
+		log.Println(`[DB] ` + e.Error())
+		return
+	}
+
+	if e, ok := err.(migrate.ErrShortLimit); ok {
+		log.Println(`[DB] ` + e.Error())
+		return
+	}
+
 	switch err {
 	case migrate.ErrNoChange:
 		log.Println(`[DB] ` + err.Error())
