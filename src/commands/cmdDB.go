@@ -9,7 +9,7 @@ var migrationNameFile string
 func createCmd() *Command {
 	cmd := NewCmd(`create`, `Create migration`, db.MigrateCreate(&migrationNameFile))
 	cmd.Flaggy.String(&migrationNameFile, "n", "name", "Name of new migration")
-
+	cmd.Flaggy.AdditionalHelpPrepend = `Example: ./migrator create --name='create social users'`
 	return &cmd
 }
 
