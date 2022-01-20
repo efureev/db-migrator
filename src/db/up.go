@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database"
 )
 
 // MigrateUp migrates up
@@ -24,6 +25,11 @@ func MigrateUp() {
 	}
 
 	if e, ok := err.(migrate.ErrShortLimit); ok {
+		log.Println(`[DB] ` + e.Error())
+		return
+	}
+
+	if e, ok := err.(database.Error); ok {
 		log.Println(`[DB] ` + e.Error())
 		return
 	}
