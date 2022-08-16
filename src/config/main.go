@@ -19,12 +19,16 @@ type Database struct {
 
 type Config struct {
 	Database Database
+	Test     string
 }
 
 var c = Config{}
 
 func Init() {
 	viper.SetEnvPrefix("MGTR")
+	viper.AutomaticEnv()
+	viper.KeyDelimiter(`_`)
+
 	configName := "config"
 	env := os.Getenv(`MGTR_APP_ENVIRONMENT`)
 
@@ -43,6 +47,26 @@ func Init() {
 	err = viper.Unmarshal(&c)
 	if err != nil {
 		log.Fatalf("unable to decode into struct, %v", err)
+	}
+
+	// @todo переделать
+	if v := viper.Get(`database_host`); v != nil {
+		c.Database.Host = v.(string)
+	}
+	if v := viper.Get(`database_user`); v != nil {
+		c.Database.User = v.(string)
+	}
+	if v := viper.Get(`database_name`); v != nil {
+		c.Database.Name = v.(string)
+	}
+	if v := viper.Get(`database_password`); v != nil {
+		c.Database.Password = v.(string)
+	}
+	if v := viper.Get(`database_migrationspath`); v != nil {
+		c.Database.MigrationsPath = v.(string)
+	}
+	if v := viper.Get(`database_port`); v != nil {
+		c.Database.Port = v.(int)
 	}
 
 	if c.Database.MigrationsPath == `` {

@@ -6,11 +6,12 @@ import (
 
 var ListCmd = []Commands{
 	createCmd(),
-	upCmd(),
 	downCmd(),
 	refreshCmd(),
-	wipeCmd(),
+	statusCmd(),
+	upCmd(),
 	versionCmd(),
+	wipeCmd(),
 }
 
 var list []*Command

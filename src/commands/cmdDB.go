@@ -42,3 +42,9 @@ func versionCmd() *Command {
 
 	return &cmd
 }
+
+func statusCmd() *Command {
+	cmd := NewCmd(`status`, `Print current status`, db.Status)
+
+	return &cmd
+}
