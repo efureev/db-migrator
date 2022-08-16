@@ -5,6 +5,14 @@ APP_NAME="migrator"
 VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
 VERSION_TAG=$(git describe --abbrev=0 --tags)
 
+VERSION=${VERSION:-VERSION_TAG}
+
+echo "Building options"
+echo "- VERSION: $VERSION"
+echo "- COMMIT: $VERSION_BUILD"
+echo " "
+
+
 for OS in darwin linux ;
 # for OS in darwin ;
 do

@@ -6,12 +6,15 @@ PKG := "$(PROJECT_NAME)"
 #CONTAINER_IMAGE := "git.sitesoft.ru/${CI_PROJECT_PATH}"
 CONTAINER_IMAGE := "${PROJECT_NAME}"
 
+VERSION_BUILD=$(shell git log --pretty="%h" -n1 HEAD)
+VERSION_TAG=$(shell git describe --abbrev=0 --tags)
+
 PKG_LIST := $(shell go list ${PKG}/... | grep -v /vendor/)
 GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/ | grep -v _test.go)
 BUILD_PATH :="build"
 
-VERSION_COMMIT :=  $(git log --pretty="%h" -n1 HEAD)
-VERSION_DEFAULT := $(git tag --sort=-v:refname --list "v[0-9]*" | head -n 1)
+#VERSION_COMMIT :=  $(git log --pretty="%h" -n1 HEAD)
+#VERSION_DEFAULT := $(git tag --sort=-v:refname --list "v[0-9]*" | head -n 1)
 
 .PHONY: all dep d-build build test coverage coverhtml lint
 
@@ -44,7 +47,7 @@ build: dep ## Build the binary file
 
 docker: ## Build the binary file
 #	docker build --build-arg SSH_PRIVATE_KEY --build-arg SOCIAL_SECRET --tag $CONTAINER_IMAGE:$NOW_TIMESTAMP --tag $CONTAINER_IMAGE:latest --cache-from $CONTAINER_IMAGE:latest .
-	docker build --tag migrator:latest -f ./.ci/Dockerfile .
+	docker build --build-arg VERSION_DEFAULT=${VERSION_TAG}  --tag migrator:latest -f ./.ci/Dockerfile .
 
 help: ## Display this help screen
 	@grep -h -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
