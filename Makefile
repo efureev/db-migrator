@@ -8,6 +8,7 @@ CONTAINER_IMAGE := "${PROJECT_NAME}"
 
 VERSION_BUILD=$(shell git log --pretty="%h" -n1 HEAD)
 VERSION_TAG=$(shell git describe --abbrev=0 --tags)
+BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%S')
 
 PKG_LIST := $(shell go list ${PKG}/... | grep -v /vendor/)
 GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/ | grep -v _test.go)
@@ -47,7 +48,10 @@ build: dep ## Build the binary file
 
 docker: ## Build the binary file
 #	docker build --build-arg SSH_PRIVATE_KEY --build-arg SOCIAL_SECRET --tag $CONTAINER_IMAGE:$NOW_TIMESTAMP --tag $CONTAINER_IMAGE:latest --cache-from $CONTAINER_IMAGE:latest .
-	docker build --build-arg VERSION_DEFAULT=${VERSION_TAG}  --tag migrator:latest -f ./.ci/Dockerfile .
+	docker build \
+		--build-arg VERSION_DEFAULT="${VERSION_TAG}" \
+		--build-arg BUILD_TIME="${BUILD_TIME}" \
+		--tag migrator:latest -f ./.ci/Dockerfile .
 
 help: ## Display this help screen
 	@grep -h -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'

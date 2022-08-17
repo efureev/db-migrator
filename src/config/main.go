@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 )
 
@@ -41,12 +42,17 @@ func Init() {
 
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {
-		panic(fmt.Errorf("fatal error config file: %s", err))
-	}
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			fmt.Printf("fatal error config file: %s\n", err)
+			return
+		}
+		fmt.Println(err)
+	} else {
+		err = viper.Unmarshal(&c)
+		if err != nil {
+			log.Fatalf("unable to decode into struct, %v", err)
+		}
 
-	err = viper.Unmarshal(&c)
-	if err != nil {
-		log.Fatalf("unable to decode into struct, %v", err)
 	}
 
 	// @todo переделать
@@ -66,7 +72,7 @@ func Init() {
 		c.Database.MigrationsPath = v.(string)
 	}
 	if v := viper.Get(`database_port`); v != nil {
-		c.Database.Port = v.(int)
+		c.Database.Port = cast.ToInt(v)
 	}
 
 	if c.Database.MigrationsPath == `` {
