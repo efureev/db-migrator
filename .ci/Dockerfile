@@ -57,6 +57,6 @@ RUN ln -s /usr/local/bin/migrator /app/migrator
 
 WORKDIR /app
 
-ENTRYPOINT ["/app/migrator"]
+#ENTRYPOINT ["/app/migrator"]
 
-CMD ["--help"]
+#CMD ["--help"]

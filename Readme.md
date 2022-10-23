@@ -26,11 +26,13 @@ $ ./migrator up
 $
 $ MGTR_MIGRATIONS_PATH=./custom ./migrator up
 $
-$ MGTR_DATABASE_USER=fureev MGTR_DATABASE_NAME=kb-users MGTR_DATABASE_PORT=5432 go run main.go status 
+$ MGTR_DATABASE_USER=fureev MGTR_DATABASE_NAME=kb-users MGTR_DATABASE_PORT=5432 go run main.go status
+$ MGTR_DATABASE_NAME=test MGTR_DATABASE_USER='fureev' MGTR_DATABASE_PORT=5443 MGTR_DATABASE_PASSWORD=2121 go run main.go config 
 ```
 
 ### Docker
 
 ```shell
+docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e MGTR_DATABASE_USER:fureev --network host efureev/db-migrator status
 docker run -v /Volumes/Docker/data/kb/migrations:/migrations -v /Volumes/Docker/data/kb/migrator/config.test.toml:/app/config.toml --network host efureev/db-migrator up
 ```
