@@ -4,13 +4,19 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/efureev/db-migrator/src/config"
 	_ "github.com/lib/pq"
-	"migrator/src/config"
 )
 
 // Status shows status of db-connection
 func Status() {
+	size, dbStr := status()
 
+	fmt.Printf("Database size: %s\n", size)
+	fmt.Printf("conn: %s\n", dbStr)
+}
+
+func status() (string, string) {
 	dbStr := connectionStr(config.Get().Database)
 	db, err := sql.Open("postgres", dbStr)
 	if err != nil {
@@ -22,10 +28,8 @@ func Status() {
 	s := `SELECT pg_size_pretty(pg_database_size($1)) as size`
 	err = db.QueryRow(s, config.Get().Database.Name).Scan(&size)
 	if err != nil {
-		fmt.Printf("call to database failed: %s", err)
-		return
+		panic(err)
 	}
 
-	fmt.Printf("Database size: %s\n", size)
-	fmt.Printf("conn: %s\n", dbStr)
+	return size, dbStr
 }

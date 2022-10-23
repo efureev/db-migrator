@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"migrator/src/db"
+	"github.com/efureev/db-migrator/src/db"
 )
 
 var migrationNameFile string

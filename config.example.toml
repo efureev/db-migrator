@@ -1,7 +1,9 @@
+[migrations]
+path = "./migrations"
+
 [database]
-user="efureev"
-password=""
+user = "efureev"
+password = ""
 host = "localhost"
 port = 5432
 name = "db-name"
-migrationsPath = "./migrations"

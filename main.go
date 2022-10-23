@@ -1,8 +1,8 @@
 package main
 
 import (
-	"migrator/src/commands"
-	"migrator/src/config"
+	"github.com/efureev/db-migrator/src/commands"
+	"github.com/efureev/db-migrator/src/config"
 )
 
 func main() {

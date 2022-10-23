@@ -1,9 +1,9 @@
 package db
 
 import (
-	"migrator/src/config"
-
+	"github.com/efureev/db-migrator/src/config"
 	"github.com/golang-migrate/migrate/v4"
+
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
@@ -28,6 +28,6 @@ func migrateManagerCustomConfig(mConfig *migrateManagerConfig) *migrate.Migrate 
 
 func defaultMigrateConfig() *migrateManagerConfig {
 	return &migrateManagerConfig{
-		MigrationsPath: config.Get().Database.MigrationsPath,
+		MigrationsPath: config.Get().Migrations.Path,
 	}
 }

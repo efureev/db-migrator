@@ -24,7 +24,13 @@ $ ./migrator create -n file_name
 $ ./migrator create --name='create users table'
 $ ./migrator up
 $
-$ MGTR_DATABASE_MIGRATIONPATH=./custom ./migrator up
+$ MGTR_MIGRATIONS_PATH=./custom ./migrator up
 $
 $ MGTR_DATABASE_USER=fureev MGTR_DATABASE_NAME=kb-users MGTR_DATABASE_PORT=5432 go run main.go status 
+```
+
+### Docker
+
+```shell
+docker run -v /Volumes/Docker/data/kb/migrations:/migrations -v /Volumes/Docker/data/kb/migrator/config.test.toml:/app/config.toml --network host efureev/db-migrator up
 ```

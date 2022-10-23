@@ -12,6 +12,7 @@ var ListCmd = []Commands{
 	upCmd(),
 	versionCmd(),
 	wipeCmd(),
+	configCmd(),
 }
 
 var list []*Command

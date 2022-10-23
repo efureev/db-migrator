@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"migrator/src/config"
+	"github.com/efureev/db-migrator/src/config"
 )
 
 func failError(err error, msg string) {
