@@ -6,3 +6,4 @@ migrator
 .DS_Store
 .coverage
 .idea/
+migrate
