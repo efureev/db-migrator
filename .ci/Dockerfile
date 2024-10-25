@@ -1,59 +1,27 @@
-#ARG APP='migrator'
-ARG APP
-ARG BUILD_PATH='build'
-#ARG VERSION_DEFAULT=0.0.0
-#ARG BUILD_TIME='-'
-FROM golang AS builder
-ARG APP
-ARG BUILD_PATH
-ARG VERSION_DEFAULT
-ARG BUILD_TIME='-'
+# syntax=docker.io/docker/dockerfile:1.9
 
-ENV VERSION=$VERSION_DEFAULT
-ENV BUILD_TIME=$BUILD_TIME
-ENV APP_NAME=$APP
-ENV BUILD_PATH=$BUILD_PATH
+# this build is being run in the native $BUILDPLATFORM platform.
+# here you would do a cross-compilation.
+FROM --platform=$BUILDPLATFORM golang AS builder
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+WORKDIR /build
 
-ENV GOPATH /go
-ENV PATH ${GOPATH}/bin:$PATH
-ENV GO111MODULE=on
-ENV CGO_ENABLED 0
+COPY build.sh go.* *.go ./
 
-RUN echo "app: $APP_NAME"
-RUN echo "BUILD_PATH: ${BUILD_PATH}"
-RUN echo "version: ${VERSION}"
-RUN echo "build time: ${BUILD_TIME}"
+RUN ./build.sh
 
-WORKDIR /app
-COPY go.mod go.sum ./
-
-RUN go mod download
-
-COPY . ./
-
-RUN make build-docker
-
+# this build is being run in $TARGETPLATFORM platform as defined in the
+# buildx --platform argument.
 FROM alpine
-ARG APP
-ARG BUILD_PATH
-ARG VERSION_DEFAULT
+COPY --from=build /build/migrator /app/
+# NB 65534:65534 is the uid:gid of the nobody:nogroup user:group.
+# NB we use a numeric uid:gid to easy the use in kubernetes securityContext.
+#    k8s will only be able to infer the runAsUser and runAsGroup values when
+#    the USER intruction has a numeric uid:gid. otherwise it will fail with:
+#       kubelet Error: container has runAsNonRoot and image has non-numeric
+#       user (nobody), cannot verify user is non-root
 
-LABEL maintainer="Eugene Fureev <fureev@gmail.com>"
-LABEL author="Eugene Fureev <fureev@gmail.com>"
-LABEL version="${VERSION_DEFAULT}"
+USER 65534:65534
 
-RUN echo "app: $APP"
-RUN echo "BUILD_PATH: ${BUILD_PATH}"
-RUN echo "VERSION_DEFAULT: $VERSION_DEFAULT"
-
-RUN apk add --no-cache ca-certificates
-
-COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.arm64" /usr/local/bin/${APP}.arm64
-COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.amd64" /usr/local/bin/${APP}.amd64
-COPY --from=builder /app/config.example.toml /app/config.example.toml
-
-WORKDIR /app
-
-ENTRYPOINT ["${APP}.amd64"]
-
-CMD ["--help"]
+ENTRYPOINT ["/app/migrator"]

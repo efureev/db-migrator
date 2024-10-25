@@ -1,0 +1,118 @@
+name: Build
+on: [ push ]
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup environment
+        run: sudo ./.github/workflows/setup-environment.sh
+      - name: Build
+        run: |
+          set -euxo pipefail
+          # create a local buildx builder.
+          docker buildx create \
+            --name local \
+            --driver docker-container \
+            --driver-opt network=host \
+            --use
+          docker buildx ls
+          # build the images for the given platforms.
+          export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+          docker buildx build \
+            --tag localhost:5000/migrator \
+            --output type=registry \
+            --platform linux/amd64,linux/arm64,linux/arm/v8 \
+            --progress plain \
+            .
+      - name: Show image manifest
+        run: |
+          set -euxo pipefail
+          http get http://localhost:5000/v2/_catalog
+          http get http://localhost:5000/v2/migrator/tags/list
+          http get \
+            http://localhost:5000/v2/migrator/manifests/latest \
+            Accept:application/vnd.docker.distribution.manifest.list.v2+json
+          skopeo inspect --raw docker://localhost:5000/migrator
+
+      - name: Execute native container
+        run: |
+          set -euxo pipefail
+          docker rmi -f localhost:5000/migrator
+          docker run --rm -t localhost:5000/migrator
+
+      - name: Execute linux/arm64 emulated container
+        run: |
+          set -euxo pipefail
+          docker rmi -f localhost:5000/migrator
+          docker run --platform linux/arm64 --rm -t localhost:5000/migrator
+
+      - name: Execute linux/arm/v8 emulated container
+        run: |
+          set -euxo pipefail
+          docker rmi -f localhost:5000/migrator
+          docker run --platform linux/arm/v8 --rm -t localhost:5000/migrator
+
+      - name: Publish to Docker Hub
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
+          DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+        run: |
+          image_name="$(basename "$GITHUB_REPOSITORY")"
+          image_tag="staging--$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')-linux"
+          skopeo copy --all \
+            --dest-creds "$DOCKER_HUB_USER:$DOCKER_HUB_ACCESS_TOKEN" \
+            docker://localhost:5000/migrator \
+            docker://docker.io/$DOCKER_HUB_USER/$image_name:$image_tag
+
+  publish:
+    name: Publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ linux ]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish to Docker Hub
+        env:
+          DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
+          DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+        run: |
+          set -euxo pipefail
+
+          image_name="$DOCKER_HUB_USER/$(basename "$GITHUB_REPOSITORY")"
+          image_tag="$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')"
+          staging_image_tag="staging--$image_tag"
+
+          # login into docker hub.
+          docker login --username "$DOCKER_HUB_USER" --password-stdin <<EOF
+          $DOCKER_HUB_ACCESS_TOKEN
+          EOF
+
+          # publish the image manifest tag from the staging-- tags.
+          function docker-manifest-mergeish {
+            docker container run --rm \
+              -u "$(id -u):$(id -g)" -e HOME -v "$HOME:$HOME:ro" \
+              -v /etc/docker/certs.d:/etc/docker/certs.d:ro \
+              ruilopes/docker-manifest-mergeish:v0.0.1 "$@"
+          }
+          docker-manifest-mergeish \
+            -target "$image_name:$image_tag" \
+            "$image_name:$staging_image_tag-linux"
+
+          # bail without deleting the staging-- tags.
+          #exit 0
+
+          # delete the staging-- tags.
+          # NB delete is not really supported by the docker registry, so this
+          #    will leave empty manifests in the registry that you have to
+          #    manually delete.
+          #    see https://github.com/regclient/regclient/issues/96#issuecomment-930669873
+          function regctl {
+            docker container run --rm --net host \
+              -u "$(id -u):$(id -g)" -e HOME -v "$HOME:$HOME:ro" \
+              -v /etc/docker/certs.d:/etc/docker/certs.d:ro \
+              regclient/regctl:v0.7.1 "$@"
+          }
+          regctl tag rm "$image_name:$staging_image_tag-linux"
