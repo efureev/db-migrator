@@ -25,8 +25,8 @@ BUILD_TIME=${BUILD_TIME:-$BUILD_TIME_LOCAL}
 
 
 BUILDING_FLAGS="\
-     -X 'migrator/src/commands.version=$VERSION_TAG' \
-     -X 'migrator/src/commands.build=$VERSION_BUILD' \
+     -X 'migrator/src/commands.version=VERSION_TAG' \
+     -X 'migrator/src/commands.build=VERSION_BUILD' \
      -X 'migrator/src/commands.buildTime=$BUILD_TIME' \
 "
 
