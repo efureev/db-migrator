@@ -7,8 +7,6 @@ BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER:-'0'};
 allow=("local" "gh")
 targetFound=0
 
-env
-
 for i in "${allow[@]}"
 do
   if [[ $i == "$TARGET" ]]
@@ -26,7 +24,7 @@ echo "Building for $TARGET..."
 
 ####
 
-VERSION_TAG="-"
+VERSION_TAG=${VERSION_TAG:-"-"}
 VERSION_BUILD="-"
 BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
 BUILD_TIME=${BUILD_TIME:-$BUILD_TIME_LOCAL}
@@ -41,7 +39,8 @@ if [[ "$TARGET" == 'local' ]]; then
 
 elif [[ "$TARGET" == 'gh' ]]; then
 
-  VERSION_TAG=$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')
+  env
+
 #  VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
 
   if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then
