@@ -47,6 +47,9 @@ docker info
 apt-get update
 apt-get install -y qemu-user-static httpie
 
+docker login --username "$DOCKER_HUB_USER" --password-stdin <<EOF
+$DOCKER_HUB_ACCESS_TOKEN
+EOF
 # start a local registry.
 docker run -d --restart=unless-stopped --name registry -p 5000:5000 registry:2.8.3
 docker exec registry registry --version
