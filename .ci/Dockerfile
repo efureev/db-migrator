@@ -50,14 +50,10 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.arm64" /usr/local/bin/${APP}.arm64
 COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.amd64" /usr/local/bin/${APP}.amd64
-COPY --from=builder /app/config.example.toml /app/config.toml
-
-RUN ln -s /usr/local/bin/${APP} /app/${APP}.amd64
-#RUN ln -s /usr/local/bin/${APP}.amd64 /app/${APP}.amd64
-RUN ln -s /usr/local/bin/${APP}.arm64 /app/${APP}.arm64
+COPY --from=builder /app/config.example.toml /app/config.example.toml
 
 WORKDIR /app
 
-ENTRYPOINT ["/app/${APP}.amd64"]
+ENTRYPOINT ["${APP}.amd64"]
 
 CMD ["--help"]
