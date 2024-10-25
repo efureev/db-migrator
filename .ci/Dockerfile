@@ -1,16 +1,18 @@
 # syntax=docker.io/docker/dockerfile:1.9
+
 ARG TARGET='local'
 # this build is being run in the native $BUILDPLATFORM platform.
 # here you would do a cross-compilation.
 FROM --platform=$BUILDPLATFORM golang AS builder
-ARG TARGET
+ARG TARGET=${TARGET}
+ENV BUILDER_TARGET=${TARGET}
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 WORKDIR /build
 
 COPY build.sh go.* *.go ./
 
-RUN ./build.sh $TARGET
+RUN bash -c "./build.sh ${TARGET}"
 
 # this build is being run in $TARGETPLATFORM platform as defined in the
 # buildx --platform argument.
