@@ -21,7 +21,7 @@ jobs:
           # build the images for the given platforms.
           export BUILDX_NO_DEFAULT_ATTESTATIONS=1
           docker buildx build \
-            --file .ci/Dockerfile
+            --file .ci/Dockerfile  \
             --tag localhost:5000/migrator \
             --output type=registry \
             --platform linux/amd64,linux/arm64,linux/arm/v8 \
