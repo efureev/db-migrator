@@ -48,13 +48,16 @@ RUN echo "VERSION_DEFAULT: $VERSION_DEFAULT"
 
 RUN apk add --no-cache ca-certificates
 
-COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.*" /usr/local/bin/
+COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.arm64" /usr/local/bin/${APP}.arm64
+COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.amd64" /usr/local/bin/${APP}.amd64
 COPY --from=builder /app/config.example.toml /app/config.toml
 
-RUN ln -s /usr/local/bin/${APP} /app/${APP}
+RUN ln -s /usr/local/bin/${APP} /app/${APP}.amd64
+RUN ln -s /usr/local/bin/${APP}.amd64 /app/${APP}.arm64
+RUN ln -s /usr/local/bin/${APP}.arm64 /app/${APP}.arm64
 
 WORKDIR /app
 
-#ENTRYPOINT ["/app/migrator"]
+ENTRYPOINT ["/app/${APP}.amd64"]
 
-#CMD ["--help"]
+CMD ["--help"]
