@@ -1,5 +1,5 @@
 /migrations
-config.toml
+config22.toml
 config.test.toml
 migrator
 /build

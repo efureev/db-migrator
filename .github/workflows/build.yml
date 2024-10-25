@@ -54,19 +54,19 @@ jobs:
         run: |
           set -euxo pipefail
           docker rmi -f localhost:5000/$APP_NAME
-          docker run --rm -t localhost:5000/$APP_NAME
+          docker run --rm -t localhost:5000/$APP_NAME version
 
       - name: Execute linux/arm64 emulated container
         run: |
           set -euxo pipefail
           docker rmi -f localhost:5000/$APP_NAME
-          docker run --platform linux/arm64 --rm -t localhost:5000/$APP_NAME
+          docker run --platform linux/arm64 --rm -t localhost:5000/$APP_NAME version
 
       - name: Execute linux/arm/v8 emulated container
         run: |
           set -euxo pipefail
           docker rmi -f localhost:5000/$APP_NAME
-          docker run --platform linux/arm/v8 --rm -t localhost:5000/$APP_NAME
+          docker run --platform linux/arm/v8 --rm -t localhost:5000/$APP_NAME version
 
       - name: Publish to Docker Hub
         if: startsWith(github.ref, 'refs/tags/v')
