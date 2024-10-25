@@ -3,6 +3,7 @@
 set -euxo pipefail
 
 TARGET=${1:-${TARGET:-'local'}};
+APP_NAME=${APP_NAME:-'app'};
 BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER:-'0'};
 allow=("local" "gh")
 targetFound=0
@@ -70,4 +71,4 @@ if [ "$BUILD_FOR_DOCKER" == '1' ]; then
   BUILDING_FLAGS="$BUILDING_FLAGS -s -w"
 fi
 
-CGO_ENABLED=0 go build -ldflags="$BUILDING_FLAGS" -o "$BUILD_PATH/"
+CGO_ENABLED=0 go build -ldflags="$BUILDING_FLAGS" -o "$BUILD_PATH/$APP_NAME"

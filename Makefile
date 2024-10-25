@@ -46,7 +46,7 @@ clean:
 	-rm -r "./${BUILD_PATH}"
 
 build: ## Build the binary file
-	./build.sh
+	APP_NAME=migrator ./build.sh
 
 build-docker:
 	BUILD_FOR_DOCKER=1 ./build.sh
