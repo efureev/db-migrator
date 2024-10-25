@@ -4,7 +4,7 @@ ARG TARGET='local'
 # this build is being run in the native $BUILDPLATFORM platform.
 # here you would do a cross-compilation.
 FROM --platform=$BUILDPLATFORM golang AS builder
-ARG TARGET=${TARGET}
+ARG TARGET
 ENV BUILDER_TARGET=${TARGET}
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM

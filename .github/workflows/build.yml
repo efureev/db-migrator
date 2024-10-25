@@ -14,6 +14,8 @@ jobs:
       - name: Setup environment
         run: sudo ./.github/workflows/setup-environment.sh
       - name: Build
+        env:
+          GITHUB_REF: $(echo "${{github.ref}}" | sed -E 's,^refs/tags/,,')
         run: |
           set -euxo pipefail
           # create a local buildx builder.
