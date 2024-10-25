@@ -1,5 +1,6 @@
-#ARG APP='App'
-#ARG BUILD_PATH='build'
+#ARG APP='migrator'
+ARG APP
+ARG BUILD_PATH='build'
 #ARG VERSION_DEFAULT=0.0.0
 #ARG BUILD_TIME='-'
 FROM golang AS builder
@@ -30,8 +31,6 @@ RUN go mod download
 
 COPY . ./
 
-RUN ls -la "/app"
-
 RUN make build-docker
 
 FROM alpine
@@ -43,7 +42,6 @@ LABEL maintainer="Eugene Fureev <fureev@gmail.com>"
 LABEL author="Eugene Fureev <fureev@gmail.com>"
 LABEL version="${VERSION_DEFAULT}"
 
-RUN echo "BUILD_PATH: $BUILD_PATH"
 RUN echo "app: $APP"
 RUN echo "BUILD_PATH: ${BUILD_PATH}"
 RUN echo "VERSION_DEFAULT: $VERSION_DEFAULT"
