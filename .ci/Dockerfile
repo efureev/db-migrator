@@ -32,6 +32,7 @@ RUN bash -c "./build.sh ${TARGET}"
 # buildx --platform argument.
 FROM alpine
 ARG APP_NAME
+ENV APP_NAME=${APP_NAME}
 
 COPY --from=builder /build/$APP_NAME /app/$APP_NAME
 # NB 65534:65534 is the uid:gid of the nobody:nogroup user:group.
@@ -43,4 +44,4 @@ COPY --from=builder /build/$APP_NAME /app/$APP_NAME
 
 USER 65534:65534
 
-ENTRYPOINT ["/app/$APP_NAME"]
+ENTRYPOINT /app/$APP_NAME

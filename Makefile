@@ -53,11 +53,13 @@ build-docker:
 
 build-docker-image:
 	docker build \
-		--build-arg APP="${APP}" \
-		--build-arg BUILD_PATH="${BUILD_PATH}" \
-		--build-arg VERSION_DEFAULT="${VERSION_TAG}" \
-		--build-arg BUILD_TIME="${BUILD_TIME}" \
-		--tag efureev/db-migrator:latest -f ./.ci/Dockerfile .
+		--build-arg TARGET="local" \
+		--build-arg VERSION_TAG="${VERSION_TAG}" \
+		--build-arg APP_NAME="migrate" \
+		--tag efureev/db-migrator:latest \
+		--progress plain \
+		-f ./.ci/Dockerfile \
+		.
 
 # example: make release V=0.0.0
 release:
