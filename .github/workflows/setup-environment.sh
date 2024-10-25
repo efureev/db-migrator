@@ -1,8 +1,7 @@
 #!/bin/bash
-set -euxo pipefail
+set -exo pipefail
 
-DOCKER_HUB_USER=${DOCKER_HUB_USER}
-DOCKER_HUB_ACCESS_TOKEN=${DOCKER_HUB_ACCESS_TOKEN}
+env
 
 # configure skopeo.
 install -d -m 755 /etc/containers/registries.conf.d
