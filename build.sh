@@ -3,7 +3,7 @@
 set -euxo pipefail
 
 TARGET=${1:-${TARGET:-'local'}};
-APP_NAME=${APP_NAME:-'app'};
+APP_NAME=${APP_NAME:-'migrate'};
 BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER:-'0'};
 allow=("local" "gh")
 targetFound=0
@@ -29,14 +29,12 @@ VERSION_TAG=${VERSION_TAG:-"-"}
 VERSION_BUILD="-"
 BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
 BUILD_TIME=${BUILD_TIME:-$BUILD_TIME_LOCAL}
-BUILD_PATH=${BUILD_PATH:-"."}
 
 #
 if [[ "$TARGET" == 'local' ]]; then
 
   VERSION_TAG=$(git describe --abbrev=0 --tags)
   VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
-  BUILD_PATH="./build"
 
 elif [[ "$TARGET" == 'gh' ]]; then
 
@@ -71,4 +69,4 @@ if [ "$BUILD_FOR_DOCKER" == '1' ]; then
   BUILDING_FLAGS="$BUILDING_FLAGS -s -w"
 fi
 
-CGO_ENABLED=0 go build -ldflags="$BUILDING_FLAGS" -o "$BUILD_PATH/$APP_NAME"
+CGO_ENABLED=0 go build -ldflags="$BUILDING_FLAGS" -o "$APP_NAME"

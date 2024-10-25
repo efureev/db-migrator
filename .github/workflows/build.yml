@@ -1,7 +1,7 @@
 name: Build
 on: [ push ]
 env:
-  APP_NAME: 'migrator'
+  APP_NAME: 'migrate'
 jobs:
   linux:
     name: Linux
