@@ -22,6 +22,8 @@ if [ "$targetFound" == 0 ]; then
   exit;
 fi
 
+echo "Building for $TARGET..."
+
 ####
 
 VERSION_TAG="-"
