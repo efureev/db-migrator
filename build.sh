@@ -18,9 +18,9 @@ else
     echo "Compiling to $TARGETPLATFORM"
 fi
 
-VERSION_TAG=$(git describe --abbrev=0 --tags)
-VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
-BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
+#VERSION_TAG=$(git describe --abbrev=0 --tags)
+#VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
+#BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
 BUILD_TIME=${BUILD_TIME:-$BUILD_TIME_LOCAL}
 
 
