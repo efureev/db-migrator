@@ -1,6 +1,6 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
-set -eux
+set -euxo pipefail
 
 if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then
     echo "Cross-compiling to $TARGETPLATFORM"
