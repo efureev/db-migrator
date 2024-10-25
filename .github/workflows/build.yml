@@ -12,7 +12,7 @@ jobs:
           ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
           EOF
       - name: Setup environment
-        run: ./.github/workflows/setup-environment.sh
+        run: sudo ./.github/workflows/setup-environment.sh
       - name: Build
         run: |
           set -euxo pipefail
