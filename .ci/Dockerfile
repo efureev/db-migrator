@@ -13,9 +13,11 @@ ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 WORKDIR /build
 
-COPY build.sh go.* *.go ./
+COPY go.mod go.sum ./
 
 RUN go mod download
+
+COPY . ./
 
 RUN bash -c "./build.sh ${TARGET}"
 
