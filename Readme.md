@@ -91,6 +91,6 @@ name = "testing"
 More examples:
 
 ```shell
-docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e MGT_DATABASE_USER:fureev --network host efureev/db-migrator status
+docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e DB_USER:fureev --network host efureev/db-migrator status
 docker run -v /Volumes/Docker/data/kb/migrations:/migrations -v /Volumes/Docker/data/kb/migrator/config.test.yaml:/app/config.yaml --network host efureev/db-migrator up
 ```
