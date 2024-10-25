@@ -67,7 +67,7 @@ jobs:
 #          docker rmi -f localhost:5000/$APP_NAME
 #          docker run --platform linux/arm/v8 --rm -t localhost:5000/$APP_NAME
       - name: Publish to Docker Hub
-#        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
           DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
@@ -84,7 +84,7 @@ jobs:
     name: Publish
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [ linux ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Publish to Docker Hub
