@@ -50,14 +50,32 @@ jobs:
             Accept:application/vnd.docker.distribution.manifest.list.v2+json
           skopeo inspect --raw docker://localhost:5000/$APP_NAME
 
+#      - name: Execute native container
+#        run: |
+#          set -euxo pipefail
+#          docker rmi -f localhost:5000/$APP_NAME
+#          docker run --rm -t localhost:5000/$APP_NAME version
+#
+#      - name: Execute linux/arm64 emulated container
+#        run: |
+#          set -euxo pipefail
+#          docker rmi -f localhost:5000/$APP_NAME
+#          docker run --platform linux/arm64 --rm -t localhost:5000/$APP_NAME version
+#
+#      - name: Execute linux/arm/v8 emulated container
+#        run: |
+#          set -euxo pipefail
+#          docker rmi -f localhost:5000/$APP_NAME
+#          docker run --platform linux/arm/v8 --rm -t localhost:5000/$APP_NAME version
+
       - name: Publish to Docker Hub
-        ### if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
           DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
         run: |
           image_name="$(basename "$GITHUB_REPOSITORY")"
-# image_tag="staging--$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')-linux"
+#          image_tag="staging--$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')-linux"
           image_tag="staging--test-linux"
           skopeo copy --all \
             --dest-creds "$DOCKER_HUB_USER:$DOCKER_HUB_ACCESS_TOKEN" \
