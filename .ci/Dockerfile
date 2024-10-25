@@ -49,9 +49,9 @@ RUN echo "VERSION_DEFAULT: $VERSION_DEFAULT"
 RUN apk add --no-cache ca-certificates
 
 COPY --from=builder "/app/${BUILD_PATH}/${APP}.linux.x64" /usr/local/bin/${APP}
-COPY --from=builder /app/config.example.toml /app/config.example.toml
+COPY --from=builder /app/config.example.toml /app/config.toml
 
-RUN ln -s /usr/local/bin/migrator /app/migrator
+RUN ln -s /usr/local/bin/${APP} /app/${APP}
 
 WORKDIR /app
 
