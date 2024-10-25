@@ -29,7 +29,7 @@ jobs:
           export BUILDX_NO_DEFAULT_ATTESTATIONS=1
           docker buildx build \
             --file .ci/Dockerfile \
-            --build-arg "TARGET=gh APP_REF=$VERSION_TAG" \
+            --build-arg "TARGET=gh VERSION_TAG=$VERSION_TAG" \
             --tag localhost:5000/migrator \
             --output type=registry \
             --platform linux/amd64,linux/arm64,linux/arm/v8 \

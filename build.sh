@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-TARGET=${1:-${BUILDER_TARGET:-'local'}};
+TARGET=${1:-${TARGET:-'local'}};
 BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER:-'0'};
 allow=("local" "gh")
 targetFound=0

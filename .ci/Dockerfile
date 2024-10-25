@@ -6,14 +6,16 @@ ARG VERSION_TAG
 # here you would do a cross-compilation.
 FROM --platform=$BUILDPLATFORM golang AS builder
 ARG TARGET
+ENV TARGET=${TARGET}
 ARG VERSION_TAG
-ENV BUILDER_TARGET=${TARGET}
 ENV VERSION_TAG=${VERSION_TAG}
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 WORKDIR /build
 
 COPY build.sh go.* *.go ./
+
+RUN go mod download
 
 RUN bash -c "./build.sh ${TARGET}"
 
