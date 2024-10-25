@@ -1,34 +1,63 @@
 #!/usr/bin/env bash
 
-BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER}
-BUILD_PATH=${BUILD_PATH:-"build"}
-APP_NAME=${APP_NAME:-'migrator'}
-VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
-VERSION_TAG=$(git describe --abbrev=0 --tags)
-BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
+set -euxo pipefail
 
-VERSION=${VERSION:-$VERSION_TAG}
+TARGET=${1:-${TARGET:-'local'}};
+APP_NAME=${APP_NAME:-'migrate'};
+BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER:-'0'};
+allow=("local" "gh")
+targetFound=0
+
+for i in "${allow[@]}"
+do
+  if [[ $i == "$TARGET" ]]
+  then
+    targetFound=1
+  fi
+done
+
+if [ "$targetFound" == 0 ]; then
+  echo "Not found a Target"
+  exit;
+fi
+
+echo "Building for $TARGET..."
+
+####
+
+VERSION_TAG=${VERSION_TAG:-"-"}
+VERSION_BUILD="-"
+BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
 BUILD_TIME=${BUILD_TIME:-$BUILD_TIME_LOCAL}
 
-# This list is based on:
-# https://github.com/golang/go/blob/master/src/go/build/syslist.go
-gooses=(
-    darwin linux #windows
-)
-gooses=($(printf -- '%s\n' "${gooses[@]}" | sort))
+#
+if [[ "$TARGET" == 'local' ]]; then
 
-# This list is based on:
-# https://github.com/golang/go/blob/master/src/go/build/syslist.go
-goarches=(
-    amd64 arm64
-)
-goarches=($(printf -- '%s\n' "${goarches[@]}" | sort))
+  VERSION_TAG=$(git describe --abbrev=0 --tags)
+  VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
 
-echo "Building options"
-echo "- VERSION: $VERSION"
-echo "- COMMIT: $VERSION_BUILD"
-echo "- BUILD_TIME: $BUILD_TIME"
-echo " "
+elif [[ "$TARGET" == 'gh' ]]; then
+
+  env
+
+#  VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
+
+  if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then
+      echo "Cross-compiling to $TARGETPLATFORM"
+      # $TARGETPLATFORM is something like:
+      #   linux/amd64
+      #   linux/arm64
+      #   linux/arm/v8
+      target_platform=(${TARGETPLATFORM//\// })
+      export GOOS=${target_platform[0]}
+      export GOARCH=${target_platform[1]}
+      if [ "${#target_platform[@]}" -gt 2 ]; then
+          export GOARM=${target_platform[2]//v}
+      fi
+  else
+      echo "Compiling to $TARGETPLATFORM"
+  fi
+fi
 
 BUILDING_FLAGS="\
      -X 'migrator/src/commands.version=$VERSION_TAG' \
@@ -40,28 +69,4 @@ if [ "$BUILD_FOR_DOCKER" == '1' ]; then
   BUILDING_FLAGS="$BUILDING_FLAGS -s -w"
 fi
 
-for goos in "${gooses[@]}"
-do
-    for goarch in "${goarches[@]}"
-    do
-#        GOOS="$goos" GOARCH="$goarch" go build -o /dev/null main.go >out.log 2>err.log
-        CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -ldflags="$BUILDING_FLAGS" -o $BUILD_PATH/$APP_NAME.$goos.$goarch main.go >out.log 2>err.log
-        if [ $? -eq 0 ]
-        then
-            :
-        else
-            if grep -qe '^cmd/go: unsupported GOOS/GOARCH pair' err.log
-            then
-                :
-            else
-                mv err.log $goos-$goarch.err.log
-            fi
-        fi
-        if [ -s out.log ]
-        then
-            mv out.log $goos-$goarch.out.log
-        fi
-    done
-done
-rm -f out.log err.log
-echo ""
+CGO_ENABLED=0 go build -ldflags="$BUILDING_FLAGS" -o "$APP_NAME"

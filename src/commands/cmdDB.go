@@ -38,7 +38,7 @@ func wipeCmd() *Command {
 }
 
 func versionCmd() *Command {
-	cmd := NewCmd(`version`, `Print current migration version`, db.Version)
+	cmd := NewCmd(`db:version`, `Print current migration version`, db.Version)
 
 	return &cmd
 }

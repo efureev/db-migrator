@@ -18,6 +18,7 @@ func MigrateCreate(migrationNameFile *string) func() {
 }
 
 func migrateCreate(migrationNameFile string) (string, string) {
+	config.Check()
 	log.Println(`creating migration...`)
 
 	if migrationNameFile == `` {
@@ -27,7 +28,7 @@ func migrateCreate(migrationNameFile string) (string, string) {
 	fn := strcase.ToSnake(migrationNameFile)
 
 	ts := time.Now().Unix()
-	migrationPath := config.Get().Migrations.Path
+	migrationPath := config.Get().Migrations.Dir
 
 	upFilePath := createFile(fmt.Sprintf("%s/%d_%s.up.sql", migrationPath, ts, fn))
 	downFilePath := createFile(fmt.Sprintf("%s/%d_%s.down.sql", migrationPath, ts, fn))

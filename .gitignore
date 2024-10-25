@@ -1,7 +1,7 @@
 /migrations
 config.toml
 config.test.toml
-migrator
-/build
 .DS_Store
 .coverage
+.idea/
+migrate

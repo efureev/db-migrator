@@ -28,6 +28,6 @@ func migrateManagerCustomConfig(mConfig *migrateManagerConfig) *migrate.Migrate 
 
 func defaultMigrateConfig() *migrateManagerConfig {
 	return &migrateManagerConfig{
-		MigrationsPath: config.Get().Migrations.Path,
+		MigrationsPath: config.Get().Migrations.Dir,
 	}
 }

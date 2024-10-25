@@ -1,6 +1,8 @@
 APP ?= "migrator"
 PKG ?= "github.com/efureev/db-migrator"
 
+DC_RUN_ARGS = --rm --user "$(shell id -u):$(shell id -g)"
+
 TEST_FLAGS ?=
 BUILD_PATH ?= build
 COVERAGE_DIR ?= .coverage
@@ -19,13 +21,22 @@ GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/ | grep -v _test.go)
 
 all: help
 
-lint: ## Lint the files
-	@golint -set_exit_status ${PKG_LIST}
+fmt: ## Run source code formatter tools
+	docker-compose run $(DC_RUN_ARGS) --no-deps go gofmt -s -w -d .
+	docker-compose run $(DC_RUN_ARGS) --no-deps go go mod tidy
+
+lint: ## Run go linters
+	docker-compose run --rm --no-deps golint golangci-lint run
+
+gotest: ## Run go tests
+	docker-compose run $(DC_RUN_ARGS) --no-deps go go test -v -race -timeout 5s ./...
+
+test: lint gotest ## Run go tests and linters
 
 test-short:
 	make test-with-flags --ignore-errors TEST_FLAGS='-short'
 
-test:
+test2:
 	@-rm -r $(COVERAGE_DIR)
 	@mkdir $(COVERAGE_DIR)
 	make test-with-flags TEST_FLAGS='-v -race -covermode atomic -coverprofile $(COVERAGE_DIR)/combined.txt -bench=. -benchmem -timeout 20m'
@@ -33,31 +44,33 @@ test:
 test-with-flags:
 	@go test $(TEST_FLAGS) ./...
 
-race: dep ## Run data race detector
-	@go test -race -short ${PKG_LIST}
-
-msan: dep ## Run memory sanitizer
-	@go test -msan -short ${PKG_LIST}
-
-html-coverage:
-	go tool cover -html=$(COVERAGE_DIR)/combined.txt
+#race: dep ## Run data race detector
+#	@go test -race -short ${PKG_LIST}
+#
+#msan: dep ## Run memory sanitizer
+#	@go test -msan -short ${PKG_LIST}
+#
+#html-coverage:
+#	go tool cover -html=$(COVERAGE_DIR)/combined.txt
 
 clean:
 	-rm -r "./${BUILD_PATH}"
 
 build: ## Build the binary file
-	./build.sh
+	APP_NAME=migrator ./build.sh
 
 build-docker:
 	BUILD_FOR_DOCKER=1 ./build.sh
 
 build-docker-image:
 	docker build \
-		--build-arg APP="${APP}" \
-		--build-arg BUILD_PATH="${BUILD_PATH}" \
-		--build-arg VERSION_DEFAULT="${VERSION_TAG}" \
-		--build-arg BUILD_TIME="${BUILD_TIME}" \
-		--tag efureev/db-migrator:latest -f ./.ci/Dockerfile .
+		--build-arg TARGET="local" \
+		--build-arg VERSION_TAG="${VERSION_TAG}" \
+		--build-arg APP_NAME="migrate" \
+		--tag efureev/db-migrator:latest \
+		--progress plain \
+		-f ./.ci/Dockerfile \
+		.
 
 # example: make release V=0.0.0
 release:
