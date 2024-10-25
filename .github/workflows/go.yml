@@ -68,5 +68,5 @@ jobs:
             type=local,src=~/.cache/buildx-cache
             type=local,src=~/go/pkg/mod
           cache-to: |
-            type=local,src=~/.cache/buildx-cache
-            type=local,src=~/go/pkg/mod
+            type=local,dest=~/.cache/buildx-cache
+            type=local,dest=~/go/pkg/mod
