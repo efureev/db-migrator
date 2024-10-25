@@ -14,7 +14,7 @@ RUN ./build.sh
 # this build is being run in $TARGETPLATFORM platform as defined in the
 # buildx --platform argument.
 FROM alpine
-COPY --from=build /build/migrator /app/
+COPY --from=builder /build/migrator /app/
 # NB 65534:65534 is the uid:gid of the nobody:nogroup user:group.
 # NB we use a numeric uid:gid to easy the use in kubernetes securityContext.
 #    k8s will only be able to infer the runAsUser and runAsGroup values when
