@@ -82,7 +82,8 @@ jobs:
 
   publish:
     name: Publish
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: false
+#    if: startsWith(github.ref, 'refs/tags/v')
     needs: [ linux ]
     runs-on: ubuntu-latest
     steps:
@@ -104,15 +105,15 @@ jobs:
           EOF
 
           # publish the image manifest tag from the staging-- tags.
-          #          function docker-manifest-mergeish {
-          #            docker container run --rm \
-          #              -u "$(id -u):$(id -g)" -e HOME -v "$HOME:$HOME:ro" \
-          #              -v /etc/docker/certs.d:/etc/docker/certs.d:ro \
-          #              ruilopes/docker-manifest-mergeish:v0.0.1 "$@"
-          #          }
-          #          docker-manifest-mergeish \
-          #            -target "$image_name:$image_tag" \
-          #            "$image_name:$staging_image_tag-linux"
+          function docker-manifest-mergeish {
+            docker container run --rm \
+              -u "$(id -u):$(id -g)" -e HOME -v "$HOME:$HOME:ro" \
+              -v /etc/docker/certs.d:/etc/docker/certs.d:ro \
+              ruilopes/docker-manifest-mergeish:v0.0.1 "$@"
+          }
+          docker-manifest-mergeish \
+            -target "$image_name:$image_tag" \
+            "$image_name:$staging_image_tag-linux"
 
           # bail without deleting the staging-- tags.
           #exit 0
