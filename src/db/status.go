@@ -10,6 +10,7 @@ import (
 
 // Status shows status of db-connection
 func Status() {
+	config.Check()
 	size, dbStr := status()
 
 	fmt.Printf("Database size: %s\n", size)

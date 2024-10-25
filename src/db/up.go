@@ -1,6 +1,7 @@
 package db
 
 import (
+	"github.com/efureev/db-migrator/src/config"
 	"log"
 	"os"
 
@@ -10,6 +11,7 @@ import (
 
 // MigrateUp migrates up
 func MigrateUp() {
+	config.Check()
 	log.Println(`migrating up...`)
 
 	err := migrateManager().Up()

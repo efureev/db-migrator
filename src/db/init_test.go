@@ -13,13 +13,13 @@ func InitConfigForTest() {
 func initConfigForEnvironment(env string) {
 	os.Setenv(`MGTR_APP_ENVIRONMENT`, env)
 	os.Setenv(`MGTR_APP_CONFIG_PATH`, `../..`)
-	config.Init()
+	config.GetConfig(``)
 }
 
 func Test_Init(t *testing.T) {
 	InitConfigForTest()
 
-	if config.Get().Migrations.Path != `./migrations` {
+	if config.Get().Migrations.Dir != `./migrations` {
 		t.Fatalf("`%s` should be `%s`", `Migrations.Path`, `./migrations`)
 	}
 }

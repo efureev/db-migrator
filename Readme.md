@@ -33,6 +33,6 @@ $ MGTR_DATABASE_NAME=test MGTR_DATABASE_USER='fureev' MGTR_DATABASE_PORT=5443 MG
 ### Docker
 
 ```shell
-docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e MGTR_DATABASE_USER:fureev --network host ghcr.io/efureev/db-migrator status
+docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e MGT_DATABASE_USER:fureev --network host ghcr.io/efureev/db-migrator status
 docker run -v /Volumes/Docker/data/kb/migrations:/migrations -v /Volumes/Docker/data/kb/migrator/config.test.toml:/app/config.toml --network host ghcr.io/efureev/db-migrator up
 ```

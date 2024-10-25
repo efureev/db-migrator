@@ -6,7 +6,9 @@ import (
 )
 
 func main() {
-	config.Init()
+	flags := config.ParseFlag()
+	config.GetConfig(flags.ConfigFilePath)
+
 	commands.Init()
 
 	commands.Usage()

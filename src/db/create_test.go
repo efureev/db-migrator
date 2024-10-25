@@ -9,7 +9,7 @@ import (
 
 func Test_Create(t *testing.T) {
 	InitConfigForTest()
-	config.Get().Migrations.Path = `../.` + config.Get().Migrations.Path
+	config.Get().Migrations.Dir = `../.` + config.Get().Migrations.Dir
 
 	fileName := `Create Table`
 	upFilePath, downFilePath := migrateCreate(fileName)
