@@ -41,9 +41,6 @@ COPY --from=builder /build/$APP_NAME /app/$APP_NAME
 #       kubelet Error: container has runAsNonRoot and image has non-numeric
 #       user (nobody), cannot verify user is non-root
 
-RUN ls -la /
-RUN ls -la /app
-
 USER 65534:65534
 
 ENTRYPOINT ["/app/$APP_NAME"]

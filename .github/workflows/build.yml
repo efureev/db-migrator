@@ -13,8 +13,10 @@ jobs:
           docker login --username "${{ secrets.DOCKER_HUB_USER }}" --password-stdin <<EOF
           ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
           EOF
+
       - name: Setup environment
         run: sudo ./.github/workflows/setup-environment.sh
+
       - name: Build
         env:
           VERSION_TAG: $(echo "${{github.ref}}" | sed -E 's,^refs/tags/,,')
@@ -37,6 +39,7 @@ jobs:
             --platform linux/amd64,linux/arm64,linux/arm/v8 \
             --progress plain \
             .
+
       - name: Show image manifest
         run: |
           set -euxo pipefail
@@ -50,19 +53,19 @@ jobs:
       - name: Execute native container
         run: |
           set -euxo pipefail
-          docker rmi -f localhost:5000/$APP_NAME
+#          docker rmi -f localhost:5000/$APP_NAME
           docker run --rm -t localhost:5000/$APP_NAME
 
       - name: Execute linux/arm64 emulated container
         run: |
           set -euxo pipefail
-          docker rmi -f localhost:5000/$APP_NAME
+#          docker rmi -f localhost:5000/$APP_NAME
           docker run --platform linux/arm64 --rm -t localhost:5000/$APP_NAME
 
       - name: Execute linux/arm/v8 emulated container
         run: |
           set -euxo pipefail
-          docker rmi -f localhost:5000/$APP_NAME
+#          docker rmi -f localhost:5000/$APP_NAME
           docker run --platform linux/arm/v8 --rm -t localhost:5000/$APP_NAME
 
       - name: Publish to Docker Hub
