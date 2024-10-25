@@ -38,8 +38,10 @@ jobs:
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
-          path: "/tmp/.buildx-cache"
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          path: |
+            ~/.cache/buildx-cache
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-buildx-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-buildx-
 
       - name: Extract metadata (tags, labels) for Docker
@@ -63,6 +65,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=local,src=/tmp/.buildx-cache
+            type=local,src=~/.cache/buildx-cache
+            type=local,src=~/go/pkg/mod
           cache-to: |
-            type=local,dest=/tmp/.buildx-cache
+            type=local,src=~/.cache/buildx-cache
+            type=local,src=~/go/pkg/mod
