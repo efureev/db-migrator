@@ -5,3 +5,4 @@ migrator
 /build
 .DS_Store
 .coverage
+.idea/
