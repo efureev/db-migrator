@@ -43,7 +43,7 @@ docker run -v /Volumes/Docker/project/migrations:/migrations \
   -e DB_USER=fureev \
   -e DB_NAME=testdb \
   --network host \
-  ghcr.io/efureev/db-migrator create -n 'create user table'
+  efureev/db-migrator create -n 'create user table'
 ```
 
 ```shell
@@ -53,7 +53,7 @@ docker run -v /Volumes/Docker/project/migrations:/migrations \
   -e DB_PORT=5435 \
   -e DB_NAME=testdb \
   --network host \
-  ghcr.io/efureev/db-migrator status
+  efureev/db-migrator status
 ```
 
 With config file
@@ -62,7 +62,7 @@ With config file
 docker run -v /Volumes/Docker/project/migrations:/migrations \
   -v /Volumes/Docker/data/kb/migrator/config.test.yaml:/app/config.yaml \
   --network host \
-  ghcr.io/efureev/db-migrator status
+  efureev/db-migrator status
 ```
 
 or define config file:
@@ -71,7 +71,7 @@ or define config file:
 docker run --network host \
   -v /Volumes/Docker/project/migrations:/migrations \
   -v /Volumes/Docker/data/kb/migrator/config.test.yaml:/app/config.yaml \
-  ghcr.io/efureev/db-migrator -f /app/config.yaml status
+  efureev/db-migrator -f /app/config.yaml status
 ```
 
 Where config file:
@@ -91,6 +91,6 @@ name = "testing"
 More examples:
 
 ```shell
-docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e MGT_DATABASE_USER:fureev --network host ghcr.io/efureev/db-migrator status
-docker run -v /Volumes/Docker/data/kb/migrations:/migrations -v /Volumes/Docker/data/kb/migrator/config.test.yaml:/app/config.yaml --network host ghcr.io/efureev/db-migrator up
+docker run -v /Volumes/Docker/data/kb/migrations:/migrations -e MGT_DATABASE_USER:fureev --network host efureev/db-migrator status
+docker run -v /Volumes/Docker/data/kb/migrations:/migrations -v /Volumes/Docker/data/kb/migrator/config.test.yaml:/app/config.yaml --network host efureev/db-migrator up
 ```
