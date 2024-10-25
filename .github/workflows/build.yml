@@ -73,8 +73,7 @@ jobs:
           DOCKER_HUB_ACCESS_TOKEN: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
         run: |
           image_name="$(basename "$GITHUB_REPOSITORY")"
-          # image_tag="staging--$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')-linux"
-          image_tag="staging--test-linux"
+          image_tag="staging--$(echo "$GITHUB_REF" | sed -E 's,^refs/tags/,,')-linux"
           skopeo copy --all \
             --dest-creds "$DOCKER_HUB_USER:$DOCKER_HUB_ACCESS_TOKEN" \
             docker://localhost:5000/$APP_NAME \
