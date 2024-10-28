@@ -1,5 +1,9 @@
 name: Build
-on: [ push ]
+
+on:
+  release: # Docs: <https://git.io/JeBz1#release-event-release>
+    types: [ published ]
+
 env:
   APP_NAME: 'migrate'
 
@@ -21,14 +25,6 @@ jobs:
 
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
-
-      - run: |
-          echo $GITHUB_REPOSITORY
-          basename $GITHUB_REPOSITORY
-          echo $(basename $GITHUB_REPOSITORY)
-          echo "${{ steps.slug.outputs.version }}"
-          echo "$APP_NAME"
-          echo "${{env.APP_NAME}}"
 
       - name: Build App for the Scratch
         uses: docker/build-push-action@v6
