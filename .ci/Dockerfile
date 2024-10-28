@@ -1,5 +1,8 @@
 # syntax=docker.io/docker/dockerfile:1.9
 
+# e.g.: `docker build --rm --build-arg "BASE_IMAGE=alpine:latest" -f ./Dockerfile .`
+ARG BASE_IMAGE="scratch"
+
 ARG TARGET='local'
 ARG APP_NAME='migrate'
 ARG VERSION_TAG
@@ -30,8 +33,17 @@ RUN bash -c "./build.sh ${TARGET}"
 
 # this build is being run in $TARGETPLATFORM platform as defined in the
 # buildx --platform argument.
-FROM alpine
+FROM ${BASE_IMAGE}
 ARG APP_NAME
+
+LABEL \
+    # Docs: <https://github.com/opencontainers/image-spec/blob/master/annotations.md>
+    org.opencontainers.image.title="migrate" \
+    org.opencontainers.image.description="migrate app (static binary file) in docker image" \
+    org.opencontainers.image.url="https://github.com/efureev/db-migrator" \
+    org.opencontainers.image.source="https://github.com/efureev/db-migrator" \
+    org.opencontainers.image.vendor="efureev" \
+    org.opencontainers.image.licenses="WTFPL"
 
 COPY --from=builder /build/$APP_NAME /bin/$APP_NAME
 # NB 65534:65534 is the uid:gid of the nobody:nogroup user:group.

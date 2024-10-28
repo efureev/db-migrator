@@ -38,10 +38,6 @@ if [[ "$TARGET" == 'local' ]]; then
 
 elif [[ "$TARGET" == 'gh' ]]; then
 
-  env
-
-#  VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
-
   if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then
       echo "Cross-compiling to $TARGETPLATFORM"
       # $TARGETPLATFORM is something like:
