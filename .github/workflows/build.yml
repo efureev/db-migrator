@@ -28,6 +28,7 @@ jobs:
           echo $(basename $GITHUB_REPOSITORY)
           echo "${{ steps.slug.outputs.version }}"
           echo "$APP_NAME"
+          echo "${{env.APP_NAME}}"
 
       - uses: docker/build-push-action@v6
         with:
@@ -36,10 +37,10 @@ jobs:
           push: true
           platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v8,linux/arm/v7
           tags: |
-            feugene/$APP_NAME:${{ steps.slug.outputs.version }}
-            feugene/$APP_NAME:latest
-            ghcr.io/${{ github.actor }}/$APP_NAME:${{ steps.slug.outputs.version }}
-            ghcr.io/${{ github.actor }}/$APP_NAME:latest
+            feugene/${{env.APP_NAME}}:${{ steps.slug.outputs.version }}
+            feugene/${{env.APP_NAME}}:latest
+            ghcr.io/${{ github.actor }}/${{env.APP_NAME}}:${{ steps.slug.outputs.version }}
+            ghcr.io/${{ github.actor }}/${{env.APP_NAME}}:latest
 #
 #      - uses: docker/build-push-action@v6
 #        with:
