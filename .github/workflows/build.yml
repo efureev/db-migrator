@@ -30,19 +30,6 @@ jobs:
           echo "$APP_NAME"
           echo "${{env.APP_NAME}}"
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./.ci/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v8,linux/arm/v7
-          build-args: "TARGET=gh VERSION_TAG=${{ steps.slug.outputs.version }} APP_NAME=${{env.APP_NAME}}"
-          tags: |
-            feugene/${{env.APP_NAME}}:${{ steps.slug.outputs.version }}
-            feugene/${{env.APP_NAME}}:latest
-            ghcr.io/${{ github.actor }}/${{env.APP_NAME}}:${{ steps.slug.outputs.version }}
-            ghcr.io/${{ github.actor }}/${{env.APP_NAME}}:latest
-
       - name: Build App for the Scratch
         uses: docker/build-push-action@v6
         with:
@@ -66,7 +53,7 @@ jobs:
           context: .
           file: ./.ci/Dockerfile
           push: true
-          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v6,linux/arm/v7
+          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v7,linux/arm/v8
           build-args: |
             BASE_IMAGE=alpine:latest
             TARGET=gh
