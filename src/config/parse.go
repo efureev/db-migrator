@@ -14,7 +14,7 @@ var cfg = Config{}
 func GetConfig(path string) Config {
 	parseConfig(path)
 
-	envconfig.MustProcess("DB", &(cfg.Database))
+	envconfig.MustProcess("DB", &cfg.Database)
 	envconfig.MustProcess("MIGRATION", &(cfg.Migrations))
 
 	fillDefault(&cfg)

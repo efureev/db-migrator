@@ -7,9 +7,9 @@ services:
   go:
     image: golang:1.23-alpine # Image page: <https://hub.docker.com/_/golang>
     working_dir: /src
-#    environment:
-#      HOME: /tmp
-#      GOPATH: /tmp
+    environment:
+      HOME: /tmp
+      GOPATH: /tmp
     volumes:
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro

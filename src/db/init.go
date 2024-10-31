@@ -16,7 +16,7 @@ func failError(err error, msg string) {
 func connectionStr(o config.Database) string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
 		o.User,
-		o.Password,
+		o.Pass,
 		o.Host,
 		o.Port,
 		o.Name,
