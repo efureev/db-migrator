@@ -41,7 +41,7 @@ docker run --rm mplatform/mquery feugene/migrate:latest
 docker run --rm --network host \
   -v ./migrations:/migrations \
   -v ./config.yaml:/tmp/config.yaml \
-  feugne/migrate:latest -f /tmp/config.yaml status
+  feugene/migrate:latest -f /tmp/config.yaml status
 ```
 
 You can define config file (yaml) `-f /tmp/config.yaml`:
@@ -65,7 +65,7 @@ docker run --rm --network host \
   -v ./migrations:/migrations \
   -e DB_USER=fureev \
   -e DB_NAME=testdb \
-  feugne/migrate:latest create -n 'create user table'
+  feugene/migrate:latest create -n 'create user table'
 ```
 
 List of all Env vars:
