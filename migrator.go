@@ -190,6 +190,12 @@ func (m *Migrator) run(ctx context.Context, d Direction, t Target) (*Report, err
 			return err
 		}
 
+		// Under the lock and against the statements about to be sent, so the
+		// plan cannot change between the look and the leap.
+		if err := m.guardLockLevel(ctx, s, steps, d); err != nil {
+			return err
+		}
+
 		for _, mig := range steps {
 			rec, err := m.applyOne(ctx, s, mig, d)
 			if err != nil {
@@ -235,6 +241,17 @@ func (m *Migrator) redo(ctx context.Context, n int) (*Report, error) {
 
 		if len(down) == 0 {
 			return nil
+		}
+
+		// Both halves are checked before either runs: refusing on the way back
+		// up, after the rollback has already happened, would leave the database
+		// somewhere nobody asked for.
+		if err := m.guardLockLevel(ctx, s, down, DirectionDown); err != nil {
+			return err
+		}
+
+		if err := m.guardLockLevel(ctx, s, down, DirectionUp); err != nil {
+			return err
 		}
 
 		for _, mig := range down {
@@ -336,7 +353,22 @@ func (m *Migrator) withLock(ctx context.Context, fn func(Session, map[int64]Reco
 // directives — and renders the SQL each step would send, after substitution.
 // It takes no lock and writes nothing.
 func (m *Migrator) Plan(ctx context.Context, d Direction, t Target) (*Plan, error) {
-	applied, _, err := m.readState(ctx)
+	// One session for the whole thing: FromDSN opens a connection per Acquire,
+	// and a plan that opened two of them to answer one question would be
+	// noticeable on a server that counts connections.
+	s, err := m.conn.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+
+		s.Release(releaseCtx)
+	}()
+
+	applied, err := m.readStateOn(ctx, s)
 	if err != nil {
 		return nil, err
 	}
@@ -350,9 +382,24 @@ func (m *Migrator) Plan(ctx context.Context, d Direction, t Target) (*Plan, erro
 		return nil, err
 	}
 
-	out := &Plan{Direction: d, Target: t, Steps: make([]Step, 0, len(steps))}
+	built, err := m.stepsFor(steps, d)
+	if err != nil {
+		return nil, err
+	}
 
-	for _, mig := range steps {
+	out := &Plan{Direction: d, Target: t, Steps: built}
+
+	m.predict(ctx, s, out.Steps)
+
+	return out, nil
+}
+
+// stepsFor renders what each migration would send, in the form it would be
+// sent.
+func (m *Migrator) stepsFor(migs []Migration, d Direction) ([]Step, error) {
+	out := make([]Step, 0, len(migs))
+
+	for _, mig := range migs {
 		body, _, _ := halfOf(mig, d)
 
 		sql, err := m.substitute(body)
@@ -375,7 +422,7 @@ func (m *Migrator) Plan(ctx context.Context, d Direction, t Target) (*Plan, erro
 			step.SQL = stmts
 		}
 
-		out.Steps = append(out.Steps, step)
+		out = append(out, step)
 	}
 
 	return out, nil
@@ -485,6 +532,21 @@ func (m *Migrator) readState(ctx context.Context) (applied map[int64]Record, ini
 	}
 
 	return applied, true, nil
+}
+
+// readStateOn reads the bookkeeping table over a session the caller already
+// holds, for the callers that need the same session afterwards.
+func (m *Migrator) readStateOn(ctx context.Context, s Session) (map[int64]Record, error) {
+	initialised, err := m.initialised(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+
+	if !initialised {
+		return map[int64]Record{}, nil
+	}
+
+	return m.recorded(ctx, s)
 }
 
 // entryFor pairs one migration with its row, if it has one.

@@ -799,24 +799,7 @@ func (e *env) showPlan(m *migrator.Migrator, d migrator.Direction, t migrator.Ta
 		return err
 	}
 
-	if plan.Empty() {
-		e.ui.Line("  Nothing to do.")
-
-		return nil
-	}
-
-	e.ui.Line(fmt.Sprintf("  Plan: %d migration(s) %s", plan.Len(), d))
-
-	for _, step := range plan.Steps {
-		kind := "transactional"
-		if !step.Transactional {
-			kind = "no-transaction"
-		}
-
-		e.ui.Line(fmt.Sprintf("    %s  (%s, %d statement(s))", step.Migration, kind, len(step.SQL)))
-	}
-
-	return nil
+	return e.ui.Render(plan)
 }
 
 // settingValue reports a setting's current value as text.
@@ -854,6 +837,8 @@ func settingValue(c *config.Config, spec config.Spec) string {
 		return strconv.FormatBool(c.Verbose)
 	case "allow-out-of-order":
 		return strconv.FormatBool(c.AllowOutOfOrder)
+	case "max-lock-level":
+		return c.MaxLockLevel
 	default:
 		return ""
 	}

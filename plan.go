@@ -1,8 +1,12 @@
 package migrator
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/efureev/db-migrator/v2/internal/sqlsplit"
 )
@@ -95,6 +99,29 @@ type Step struct {
 	// into the statements it would be sent as. For a transactional step that is
 	// one element: the body goes to the server whole.
 	SQL []string
+	// Predictions is what each statement is expected to lock, rewrite or scan.
+	//
+	// It is empty when the plan was built without a server to ask, and it is a
+	// heuristic in any case — see [Migrator.Plan].
+	Predictions []LockPrediction
+}
+
+// Heaviest reports the strongest lock this step is predicted to take, and false
+// when nothing was predicted.
+func (s Step) Heaviest() (LockPrediction, bool) { return heaviest(s.Predictions) }
+
+// HeavyPredictions reports the predictions worth putting in front of a person:
+// the ones that block writes, rewrite a table or scan one.
+func (s Step) HeavyPredictions() []LockPrediction {
+	out := make([]LockPrediction, 0, len(s.Predictions))
+
+	for _, p := range s.Predictions {
+		if p.Heavy() {
+			out = append(out, p)
+		}
+	}
+
+	return out
 }
 
 // A Plan is what a run would do, without doing it.
@@ -253,4 +280,214 @@ func splitForPlan(sql string) ([]string, error) {
 	}
 
 	return out, nil
+}
+
+// Text writes the plan as a person reads it.
+//
+// The lock line under each statement is the reason this command is worth
+// running at all: "ACCESS EXCLUSIVE on orders (~8 900 000 rows), REWRITES THE
+// TABLE" is a sentence somebody can act on before the deploy, and the same
+// fact discovered during one is an incident.
+func (p *Plan) Text(w io.Writer) error {
+	var b strings.Builder
+
+	if p.Empty() {
+		_, err := io.WriteString(w, "  Nothing to do.\n")
+
+		return err
+	}
+
+	fmt.Fprintf(&b, "  Plan  %d migration(s) %s\n", p.Len(), p.Direction)
+
+	for _, step := range p.Steps {
+		kind := "transactional"
+		if !step.Transactional {
+			kind = "no-transaction"
+		}
+
+		stmts := analysisStatements(step)
+
+		fmt.Fprintf(&b, "\n    %s  %s, %d statement(s)\n", step.Migration, kind, len(stmts))
+
+		if len(step.Predictions) == 0 {
+			continue
+		}
+
+		for i, sql := range stmts {
+			preds := predictionsFor(step.Predictions, i+1)
+			if len(preds) == 0 {
+				continue
+			}
+
+			fmt.Fprintf(&b, "      %s\n", firstLine(sql))
+
+			for _, pred := range preds {
+				fmt.Fprintf(&b, "        %s\n", describe(pred))
+
+				// The advice is worth the lines only when there is something to
+				// decide. Printing it under every catalogue-only ALTER would
+				// train people to skip the whole block.
+				if pred.Heavy() {
+					for _, line := range wrap(pred.Reason, 72) {
+						fmt.Fprintf(&b, "        %s\n", line)
+					}
+				}
+			}
+		}
+	}
+
+	_, err := io.WriteString(w, b.String())
+
+	return err
+}
+
+// JSON writes the plan in the shape a CI step parses.
+func (p *Plan) JSON(w io.Writer) error {
+	type prediction struct {
+		Statement int    `json:"statement"`
+		Relation  string `json:"relation,omitempty"`
+		Level     string `json:"level"`
+		Rewrites  bool   `json:"rewrites"`
+		Scans     bool   `json:"scans"`
+		Rows      int64  `json:"rows"`
+		Reason    string `json:"reason"`
+	}
+
+	type step struct {
+		Version       int64        `json:"version"`
+		Name          string       `json:"name"`
+		Transactional bool         `json:"transactional"`
+		Statements    []string     `json:"statements"`
+		Predictions   []prediction `json:"predictions"`
+	}
+
+	out := struct {
+		Format    int    `json:"format"`
+		Direction string `json:"direction"`
+		Target    string `json:"target"`
+		Count     int    `json:"count"`
+		Steps     []step `json:"steps"`
+	}{
+		Format: JSONFormat, Direction: p.Direction.String(),
+		Target: p.Target.String(), Count: p.Len(),
+		Steps: make([]step, 0, len(p.Steps)),
+	}
+
+	for _, s := range p.Steps {
+		item := step{
+			Version: s.Migration.Version, Name: s.Migration.Name,
+			Transactional: s.Transactional, Statements: analysisStatements(s),
+			Predictions: make([]prediction, 0, len(s.Predictions)),
+		}
+
+		for _, pred := range s.Predictions {
+			item.Predictions = append(item.Predictions, prediction{
+				Statement: pred.Statement, Relation: pred.Relation,
+				Level: pred.Level.String(), Rewrites: pred.Rewrites,
+				Scans: pred.Scans, Rows: pred.Rows, Reason: pred.Reason,
+			})
+		}
+
+		out.Steps = append(out.Steps, item)
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+
+	return enc.Encode(out)
+}
+
+// predictionsFor reports the predictions of one statement.
+func predictionsFor(preds []LockPrediction, statement int) []LockPrediction {
+	out := make([]LockPrediction, 0, 2)
+
+	for _, p := range preds {
+		if p.Statement == statement {
+			out = append(out, p)
+		}
+	}
+
+	return out
+}
+
+// describe reports one prediction as the single line under a statement.
+func describe(p LockPrediction) string {
+	switch p.Level {
+	case LockNone:
+		return "no table is locked"
+	case LockUnknown:
+		return "what this locks is unknown — this predictor does not recognise the statement"
+	}
+
+	where := p.Relation
+	if where == "" {
+		where = "an unnamed relation"
+	}
+
+	out := p.Level.String() + " on " + where
+
+	if p.Rows >= 0 {
+		out += " (~" + groupDigits(p.Rows) + " rows)"
+	}
+
+	switch {
+	case p.Rewrites:
+		out += ", REWRITES THE TABLE"
+	case p.Scans:
+		out += ", scans the table"
+	default:
+		out += ", no rewrite"
+	}
+
+	return out
+}
+
+// groupDigits writes a row count the way a person reads one, because the
+// difference between 8900000 and 890000 is the difference between a warning
+// worth heeding and one worth ignoring, and nobody counts digits.
+func groupDigits(n int64) string {
+	s := strconv.FormatInt(n, 10)
+
+	sign := ""
+	if strings.HasPrefix(s, "-") {
+		sign, s = "-", s[1:]
+	}
+
+	var b strings.Builder
+
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(' ')
+		}
+
+		b.WriteRune(c)
+	}
+
+	return sign + b.String()
+}
+
+// wrap breaks prose into lines of at most n characters, on word boundaries.
+func wrap(s string, n int) []string {
+	var (
+		out  []string
+		line string
+	)
+
+	for word := range strings.FieldsSeq(s) {
+		switch {
+		case line == "":
+			line = word
+		case len(line)+1+len(word) <= n:
+			line += " " + word
+		default:
+			out = append(out, line)
+			line = word
+		}
+	}
+
+	if line != "" {
+		out = append(out, line)
+	}
+
+	return out
 }

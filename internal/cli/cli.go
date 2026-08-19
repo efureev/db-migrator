@@ -323,6 +323,18 @@ func (e *env) open(extra ...migrator.Option) (*migrator.Migrator, error) {
 		opts = append(opts, migrator.WithOutOfOrder())
 	}
 
+	// Validate has already rejected an unparseable value, so a failure here can
+	// only mean the two disagree, and silently running without the policy is
+	// the one outcome worth avoiding.
+	if e.cfg.MaxLockLevel != "" {
+		level, ok := migrator.ParseLockLevel(e.cfg.MaxLockLevel)
+		if !ok {
+			return nil, fmt.Errorf("--max-lock-level: %q is not a lock level", e.cfg.MaxLockLevel)
+		}
+
+		opts = append(opts, migrator.WithMaxLockLevel(level))
+	}
+
 	opts = append(opts, extra...)
 
 	m, err := migrator.New(migrator.FromDSN(e.cfg.DSN), os.DirFS(dir), opts...)

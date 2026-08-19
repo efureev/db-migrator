@@ -1,0 +1,219 @@
+# Statement → prediction, checked without a server.
+#
+# The other half of the acceptance is the oracle in oracle_integration_test.go,
+# which runs each statement against a real PostgreSQL and reads pg_locks. This
+# file is not a substitute for it: a corpus written from the same reading of the
+# documentation as the rules can only prove that the author was consistent.
+# What it is for is the cases the oracle cannot reach — the version-dependent
+# rules, the offline answer, and the forms that cannot run inside the
+# transaction the oracle rolls back.
+#
+# Syntax: "version:" sets the server version for the cases below it, "sql:"
+# starts a case, and each "want:" line is one expected prediction:
+#
+#     want: <relation> | <LOCK LEVEL> | <flags>
+#
+# where flags is any of "rewrite" and "scan", space separated. A relation of "-"
+# means the prediction names none.
+
+# ---------------------------------------------------------------- PostgreSQL 17
+version: 170000
+
+sql: ALTER TABLE users ADD COLUMN email text
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE users ADD COLUMN score int DEFAULT 0 NOT NULL
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE users ADD COLUMN created_at timestamptz DEFAULT now()
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE users ADD COLUMN k uuid DEFAULT gen_random_uuid()
+want: users | ACCESS EXCLUSIVE | rewrite
+
+sql: ALTER TABLE users ADD COLUMN r double precision DEFAULT random()
+want: users | ACCESS EXCLUSIVE | rewrite
+
+# An unrecognised function is assumed volatile, because the pessimistic answer
+# is the one that cannot cause an outage.
+sql: ALTER TABLE users ADD COLUMN x int DEFAULT my_extension_thing()
+want: users | ACCESS EXCLUSIVE | rewrite
+
+sql: ALTER TABLE users ADD COLUMN total int GENERATED ALWAYS AS (a + b) STORED
+want: users | ACCESS EXCLUSIVE | rewrite scan
+
+sql: ALTER TABLE users ADD COLUMN code text UNIQUE
+want: users | ACCESS EXCLUSIVE | scan
+
+sql: ALTER TABLE users DROP COLUMN legacy
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE public.orders ALTER COLUMN status TYPE text
+want: public.orders | ACCESS EXCLUSIVE | rewrite scan
+
+sql: ALTER TABLE orders ALTER COLUMN total TYPE numeric USING total::numeric
+want: orders | ACCESS EXCLUSIVE | rewrite scan
+
+sql: ALTER TABLE users ALTER COLUMN email SET NOT NULL
+want: users | ACCESS EXCLUSIVE | scan
+
+sql: ALTER TABLE users ALTER COLUMN email DROP NOT NULL
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE users ALTER COLUMN email SET DEFAULT 'x'
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE users ALTER COLUMN email SET STATISTICS 1000
+want: users | SHARE UPDATE EXCLUSIVE
+
+sql: ALTER TABLE orders ADD CONSTRAINT positive CHECK (total > 0)
+want: orders | ACCESS EXCLUSIVE | scan
+
+sql: ALTER TABLE orders ADD CONSTRAINT positive CHECK (total > 0) NOT VALID
+want: orders | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE orders VALIDATE CONSTRAINT positive
+want: orders | SHARE UPDATE EXCLUSIVE | scan
+
+# Both tables, which is the surprise this package exists to print.
+sql: ALTER TABLE orders ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users (id)
+want: orders | SHARE ROW EXCLUSIVE | scan
+want: users | SHARE ROW EXCLUSIVE
+
+sql: ALTER TABLE orders ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES public.users (id) NOT VALID
+want: orders | SHARE ROW EXCLUSIVE
+want: public.users | SHARE ROW EXCLUSIVE
+
+sql: ALTER TABLE users ADD CONSTRAINT u UNIQUE (email)
+want: users | ACCESS EXCLUSIVE | scan
+
+sql: ALTER TABLE users ADD CONSTRAINT u UNIQUE USING INDEX ix_users_email
+want: users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE users SET UNLOGGED
+want: users | ACCESS EXCLUSIVE | rewrite scan
+
+sql: ALTER TABLE users SET TABLESPACE fast
+want: users | ACCESS EXCLUSIVE | rewrite scan
+
+sql: ALTER TABLE users SET (fillfactor = 70)
+want: users | SHARE UPDATE EXCLUSIVE
+
+# One statement, several actions: the strongest claim per table wins, and the
+# reason shown is the rewrite rather than the lock.
+sql: ALTER TABLE users ADD COLUMN a int, ADD COLUMN b uuid DEFAULT gen_random_uuid()
+want: users | ACCESS EXCLUSIVE | rewrite
+
+sql: ALTER TABLE parts ATTACH PARTITION parts_2026 FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')
+want: parts | SHARE UPDATE EXCLUSIVE
+want: parts_2026 | ACCESS EXCLUSIVE | scan
+
+sql: ALTER TABLE parts DETACH PARTITION parts_2026 CONCURRENTLY
+want: parts | SHARE UPDATE EXCLUSIVE
+want: parts_2026 | SHARE UPDATE EXCLUSIVE
+
+sql: CREATE INDEX ix ON users (email)
+want: users | SHARE | scan
+
+sql: CREATE INDEX CONCURRENTLY ix ON users (email)
+want: users | SHARE UPDATE EXCLUSIVE | scan
+
+# The ON of a partial index predicate must not be mistaken for the ON of the
+# table, which is why the cursor skips parenthesised text whole.
+sql: CREATE UNIQUE INDEX CONCURRENTLY ix ON public.users (lower(email)) WHERE deleted_at IS NULL
+want: public.users | SHARE UPDATE EXCLUSIVE | scan
+
+sql: DROP INDEX ix
+want: ix | ACCESS EXCLUSIVE
+
+sql: DROP INDEX CONCURRENTLY ix
+want: ix | SHARE UPDATE EXCLUSIVE
+
+sql: REINDEX TABLE users
+want: users | ACCESS EXCLUSIVE | scan
+
+sql: REINDEX TABLE CONCURRENTLY users
+want: users | SHARE UPDATE EXCLUSIVE | scan
+
+sql: VACUUM FULL users
+want: users | ACCESS EXCLUSIVE | rewrite scan
+
+sql: VACUUM (FULL, ANALYZE) users
+want: users | ACCESS EXCLUSIVE | rewrite scan
+
+sql: VACUUM ANALYZE users
+want: users | SHARE UPDATE EXCLUSIVE | scan
+
+sql: CLUSTER users USING ix
+want: users | ACCESS EXCLUSIVE | rewrite scan
+
+sql: REFRESH MATERIALIZED VIEW mv
+want: mv | ACCESS EXCLUSIVE | rewrite scan
+
+sql: REFRESH MATERIALIZED VIEW CONCURRENTLY mv
+want: mv | EXCLUSIVE | scan
+
+sql: TRUNCATE orders
+want: orders | ACCESS EXCLUSIVE
+
+sql: DROP TABLE IF EXISTS old_sessions
+want: old_sessions | ACCESS EXCLUSIVE
+
+sql: LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE
+want: users | SHARE ROW EXCLUSIVE
+
+sql: LOCK TABLE users
+want: users | ACCESS EXCLUSIVE
+
+sql: INSERT INTO users (name) VALUES ('a')
+want: users | ROW EXCLUSIVE
+
+sql: SELECT count(*) FROM users
+want: users | ACCESS SHARE
+
+sql: SELECT id FROM users FOR UPDATE
+want: users | ROW SHARE
+
+sql: CREATE TABLE t (id int)
+want: - | none
+
+sql: COMMENT ON TABLE users IS 'people'
+want: - | none
+
+# A quoted identifier keeps its case; an unquoted one is folded.
+sql: ALTER TABLE "Users" ADD COLUMN x int
+want: Users | ACCESS EXCLUSIVE
+
+sql: ALTER TABLE MyTable ADD COLUMN x int
+want: mytable | ACCESS EXCLUSIVE
+
+# Comments, including nested block comments, must not confuse the reader.
+sql: /* outer /* inner */ still a comment */ ALTER TABLE users DROP COLUMN legacy
+want: users | ACCESS EXCLUSIVE
+
+sql: THIS IS NOT SQL
+want: - | unknown
+
+# ---------------------------------------------------------------- PostgreSQL 10
+# Before 11 every DEFAULT on a new column rewrote the table, and before 12
+# ATTACH PARTITION locked the parent outright.
+version: 100000
+
+sql: ALTER TABLE users ADD COLUMN score int DEFAULT 0
+want: users | ACCESS EXCLUSIVE | rewrite
+
+sql: ALTER TABLE parts ATTACH PARTITION parts_2026 FOR VALUES FROM (1) TO (2)
+want: parts | ACCESS EXCLUSIVE
+want: parts_2026 | ACCESS EXCLUSIVE | scan
+
+# ------------------------------------------------------------------- no server
+# Offline, a version-dependent rule gives the answer that was true before the
+# version that improved it. Reading it optimistically would turn the rewrite of
+# a large table into a line that said it was cheap.
+version: 0
+
+sql: ALTER TABLE users ADD COLUMN score int DEFAULT 0
+want: users | ACCESS EXCLUSIVE | rewrite
+
+sql: ALTER TABLE users ADD COLUMN email text
+want: users | ACCESS EXCLUSIVE

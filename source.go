@@ -356,6 +356,15 @@ type Directives struct {
 	// Tags are free-form labels. status shows them, in the table and in the
 	// JSON, and the runner ignores them.
 	Tags []string
+	// LockAcknowledged is the heaviest lock this migration is allowed to take
+	// despite [WithMaxLockLevel], because its author looked at it and decided
+	// it was worth it. Zero means no acknowledgement, and then the run's limit
+	// applies unchanged.
+	//
+	// It lives in the file for the same reason RetrySafe does: it is a claim
+	// only the author is in a position to make, and a flag that waived it would
+	// be reached for at the moment the refusal is least welcome and most right.
+	LockAcknowledged LockLevel
 }
 
 const directivePrefix = "migrator:"
@@ -391,6 +400,18 @@ func parseDirectives(body string) (Directives, error) {
 
 		case "retry-safe":
 			d.RetrySafe = true
+
+		case "lock-acknowledged":
+			level, ok := ParseLockLevel(arg)
+			if !ok {
+				errs = append(errs, fmt.Errorf(
+					"%w: lock-acknowledged %q: expected a lock level such as access-exclusive",
+					ErrBadDirective, arg))
+
+				continue
+			}
+
+			d.LockAcknowledged = level
 
 		case "statement-timeout":
 			v, err := time.ParseDuration(arg)

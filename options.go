@@ -44,6 +44,7 @@ type config struct {
 	wipeProtectPattern string
 	dryRun             bool
 	forceWipe          bool
+	maxLockLevel       LockLevel
 }
 
 func defaults() config {
@@ -292,4 +293,29 @@ func WithForceWipe() Option {
 // pattern disables the check.
 func WithWipeProtectPattern(pattern string) Option {
 	return optionFunc(func(c *config) { c.wipeProtectPattern = pattern })
+}
+
+// WithMaxLockLevel refuses a run that would take a heavier lock than l.
+//
+// The refusal happens before the first statement, under the advisory lock, and
+// names the migration, the statement, the table and how large it is. It is a
+// policy — "nothing in this deploy may block reads" — and policies belong on
+// the run, not on each file.
+//
+// A migration that genuinely needs the heavier lock says so in its own text:
+//
+//	-- migrator:lock-acknowledged access-exclusive
+//
+// That is the same principle as retry-safe. The decision is made where the
+// knowledge is, at review time, by the person who wrote the SQL — not by
+// whoever is holding the deploy at three in the morning and can see only a
+// flag that would make the refusal go away.
+//
+// The prediction behind it is a heuristic over the statement text. It does not
+// know about triggers, rules or inheritance, and it cannot see the queue: an
+// ALTER TABLE behind a long SELECT blocks everything after it whatever lock it
+// asked for, which is what lock_timeout is for. Read it as a review that never
+// gets tired, not as a guarantee.
+func WithMaxLockLevel(l LockLevel) Option {
+	return optionFunc(func(c *config) { c.maxLockLevel = l })
 }

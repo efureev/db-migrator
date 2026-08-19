@@ -24,6 +24,8 @@ import (
 
 	"github.com/efureev/envi/v2"
 	"github.com/efureev/envi/v2/bind"
+
+	"github.com/efureev/db-migrator/v2/internal/pglock"
 )
 
 // A Kind says how a setting's text is read.
@@ -94,6 +96,11 @@ var Specs = []Spec{
 		Help: "print debug commentary; the same as --log-level=debug"},
 	{Flag: "allow-out-of-order", Key: "MIGRATOR_ALLOW_OUT_OF_ORDER", Kind: KindBool, Default: "false", Global: true,
 		Help: "apply a pending migration older than the current version"},
+	// A policy rather than a per-run confirmation, which is why it has an
+	// environment variable where --allow-down and --confirm deliberately do
+	// not: this is meant to be set once for a pipeline and left there.
+	{Flag: "max-lock-level", Key: "MIGRATOR_MAX_LOCK_LEVEL", Kind: KindString, Global: true,
+		Help: "refuse a migration taking a heavier lock, e.g. share-update-exclusive"},
 }
 
 // A Config is one run's resolved configuration.
@@ -122,7 +129,8 @@ type Config struct {
 	Quiet    bool   `env:"-"`
 	Verbose  bool   `env:"-"`
 
-	AllowOutOfOrder bool `env:"MIGRATOR_ALLOW_OUT_OF_ORDER,default=false"`
+	AllowOutOfOrder bool   `env:"MIGRATOR_ALLOW_OUT_OF_ORDER,default=false"`
+	MaxLockLevel    string `env:"MIGRATOR_MAX_LOCK_LEVEL"`
 
 	// origins records where each setting came from, keyed by flag name.
 	origins map[string]string
@@ -310,6 +318,8 @@ func assign(cfg *Config, spec Spec, raw string) error {
 		return assignBool(&cfg.Verbose, spec, raw)
 	case "allow-out-of-order":
 		return assignBool(&cfg.AllowOutOfOrder, spec, raw)
+	case "max-lock-level":
+		cfg.MaxLockLevel = raw
 	default:
 		return fmt.Errorf("unknown setting %q", spec.Flag)
 	}
@@ -378,6 +388,13 @@ func (c *Config) Validate() error {
 
 	if c.Quiet && c.Verbose {
 		errs = append(errs, errors.New("--quiet and --verbose contradict each other"))
+	}
+
+	if c.MaxLockLevel != "" {
+		if _, ok := pglock.ParseLevel(c.MaxLockLevel); !ok {
+			errs = append(errs, fmt.Errorf("--max-lock-level: %q is not a lock level; one of %s",
+				c.MaxLockLevel, lockLevelNames()))
+		}
 	}
 
 	for name, d := range map[string]time.Duration{
@@ -489,4 +506,16 @@ func parseLogLevel(s string) (string, error) {
 	default:
 		return "", fmt.Errorf("%q is not debug, info, warn or error", s)
 	}
+}
+
+// lockLevelNames reports the accepted spellings of --max-lock-level, for the
+// error that rejects a wrong one. A message that says a value is invalid
+// without saying what is valid sends the reader to the source.
+func lockLevelNames() string {
+	names := make([]string, 0, len(pglock.Levels()))
+	for _, l := range pglock.Levels() {
+		names = append(names, strings.ToLower(strings.ReplaceAll(l.String(), " ", "-")))
+	}
+
+	return strings.Join(names, ", ")
 }

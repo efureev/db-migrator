@@ -2,6 +2,56 @@
 
 Keep a Changelog, SemVer.
 
+## [2.1.0] — unreleased
+
+Migrations now say what they will lock before they run.
+
+### Added
+
+- **`migrator up --dry-run` predicts the locks.** Every statement is classified:
+  which lock it takes, whether it rewrites the table, whether it scans it, and
+  how many rows are in the table it is about to hold.
+
+  ```
+    Plan  2 migration(s) up
+
+      20260901130000_widen_status  transactional, 1 statement(s)
+        ALTER TABLE orders ALTER COLUMN status TYPE text
+          ACCESS EXCLUSIVE on orders (~8 900 000 rows), REWRITES THE TABLE
+          changing a column's type rewrites the table unless the two types are
+          binary-coercible …
+  ```
+
+  Row counts come from `pg_class.reltuples`, and version-dependent rules read
+  `server_version_num` — before PostgreSQL 11 a `DEFAULT` on a new column
+  rewrote every row, and offline that is the answer given, because the
+  optimistic guess is the one that causes an outage.
+
+- **`WithMaxLockLevel` / `--max-lock-level` refuses a run that would take a
+  heavier lock than allowed.** The refusal happens under the advisory lock,
+  before the first statement, and names the migration, the statement, the table
+  and its size. Exit code 6: fix the migration, not the database.
+
+  A migration that genuinely needs the heavier lock says so in its own text:
+
+  ```sql
+  -- migrator:lock-acknowledged access-exclusive
+  ```
+
+  There is no flag that waives it. The decision belongs where the knowledge is —
+  at review time, in the file — not with whoever is holding the deploy at three
+  in the morning. Same principle as `retry-safe`.
+
+- **`up --dry-run --json`** now emits the plan, predictions included, with the
+  usual `"format": 1`.
+
+The rule table is checked against the server rather than against itself: an
+integration test runs each statement on a real PostgreSQL and reads `pg_locks`
+to see what was actually taken. Where the two disagreed, PostgreSQL was right.
+It is still a heuristic over statement text — it cannot see triggers, rules,
+inheritance, or the queue in front of the lock — and the documentation says so
+rather than promising more.
+
 ## [2.0.1] — 2026-08-19
 
 2.0.0 shipped without its own command. Install it and there was nothing to run.
@@ -21,12 +71,14 @@ Keep a Changelog, SemVer.
   nobody was asking git. `TestNoGoFileIsIgnored` now asks, on every run.
 
   **2.0.0 cannot be repaired.** A version in the module proxy is immutable, so
-  it stays broken and 2.0.1 is the first usable release of the 2.x line.
+  it stays broken. The library half of 2.0.0 was intact — only the command was
+  missing — so `go get` worked and `go install` did not; 2.0.1 is the first
+  release of the 2.x line that installs.
 - **`migrator version --json` ignored the flag** and printed the human sentence.
   It now writes the same `"format": 1` object shape as every other command, with
   the version, commit, build date, Go version and platform.
 
-## [2.0.0] — 2026-08-19 (broken, do not use)
+## [2.0.0] — 2026-08-19 (no command; use 2.0.1 or later)
 
 A rewrite. Nothing is shared with 1.x except the idea.
 

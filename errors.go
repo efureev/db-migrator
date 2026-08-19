@@ -79,6 +79,9 @@ var (
 var (
 	// ErrDownNotAllowed reports Down or Redo without [WithAllowDown].
 	ErrDownNotAllowed = errors.New("migrator: down migrations require WithAllowDown")
+	// ErrLockTooHeavy reports a migration that would take a heavier lock than
+	// [WithMaxLockLevel] allows. It is a refusal, not a failure: nothing ran.
+	ErrLockTooHeavy = errors.New("migrator: a migration takes a heavier lock than allowed")
 	// ErrProductionGuard reports a destructive operation against a database
 	// declared to be production. No option overrides it.
 	ErrProductionGuard = errors.New("migrator: refused in a production environment")
@@ -295,3 +298,51 @@ func isValueDelimiter(c byte) bool {
 		return false
 	}
 }
+
+// A LockLevelError reports the migration that a lock policy refused, with
+// enough detail to decide what to do about it.
+//
+// It carries the prediction rather than a summary because the answer depends on
+// it: a table that is scanned can often be handled by adding the constraint NOT
+// VALID first, a rewrite usually cannot, and both answers are different again
+// when the table has four rows.
+type LockLevelError struct {
+	// Version and Name identify the migration.
+	Version int64
+	Name    string
+	// File is the file that would have run.
+	File string
+	// Limit is the level that was allowed.
+	Limit LockLevel
+	// Prediction is the statement that exceeded it.
+	Prediction LockPrediction
+}
+
+func (e *LockLevelError) Error() string {
+	where := e.Prediction.Relation
+	if where == "" {
+		where = "an unnamed relation"
+	}
+
+	if e.Prediction.Rows >= 0 {
+		where += " (~" + groupDigits(e.Prediction.Rows) + " rows)"
+	}
+
+	out := fmt.Sprintf("%s: statement %d takes %s on %s, and the limit is %s",
+		e.File, e.Prediction.Statement, e.Prediction.Level, where, e.Limit)
+
+	if e.Prediction.Rewrites {
+		out += "; it rewrites the table"
+	} else if e.Prediction.Scans {
+		out += "; it scans the table"
+	}
+
+	return out + ". " + e.Prediction.Reason +
+		". To accept it, put \"-- migrator:lock-acknowledged " +
+		strings.ToLower(strings.ReplaceAll(e.Prediction.Level.String(), " ", "-")) +
+		"\" at the head of the migration"
+}
+
+// Unwrap reports [ErrLockTooHeavy], so that a caller may match either the
+// sentinel with errors.Is or the detail with errors.AsType.
+func (e *LockLevelError) Unwrap() error { return ErrLockTooHeavy }

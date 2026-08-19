@@ -32,6 +32,28 @@ query in an implicit transaction, and `CONCURRENTLY` fails inside one. Such a
 migration is recorded in two steps, so a crash between them leaves evidence
 instead of silence.
 
+**A dry run says what each statement will lock.** Not "this migration is risky"
+— the lock mode, the table, its size, and whether it rewrites or scans:
+
+```
+  Plan  1 migration(s) up
+
+    20260901130000_widen_status  transactional, 1 statement(s)
+      ALTER TABLE orders ALTER COLUMN status TYPE text
+        ACCESS EXCLUSIVE on orders (~8 900 000 rows), REWRITES THE TABLE
+```
+
+`--max-lock-level share-update-exclusive` turns that into a refusal, before the
+first statement runs. A migration that needs the heavier lock says so in its own
+text, with `-- migrator:lock-acknowledged access-exclusive`. There is no flag
+that waives it: the decision belongs at review time, in the file, not with
+whoever is holding the deploy at three in the morning.
+
+It is a heuristic over statement text, not a planner — it cannot see triggers,
+rules, inheritance, or the queue in front of the lock. Its rule table is checked
+against a real server, which is a different thing from being checked against
+itself.
+
 **Concurrent runs serialise on a PostgreSQL advisory lock**, taken before the
 bookkeeping table is created. The lock is session-level, so a process that dies
 releases it — there is no lock row to clean up by hand.
@@ -120,6 +142,7 @@ Lines at the head of the file, above any SQL:
 -- migrator:statement-timeout 30m
 -- migrator:lock-timeout 5s
 -- migrator:tags ddl,slow
+-- migrator:lock-acknowledged access-exclusive
 ```
 
 An unrecognised directive is an error, not a warning: a mistyped
@@ -131,7 +154,7 @@ migration if you are not.
 
 | Command | What it does |
 |---|---|
-| `up` | apply pending migrations; `--to`, `--steps`, `--dry-run` |
+| `up` | apply pending migrations; `--to`, `--steps`, `--dry-run`, `--max-lock-level` |
 | `down` | roll back; needs `--allow-down`, refused in production |
 | `redo` | roll back and re-apply, under one lock |
 | `status` | what is applied and what is pending; `--check` for CI, `--current` for scripts |

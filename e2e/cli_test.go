@@ -242,6 +242,47 @@ func TestExitCodeTable(t *testing.T) {
 		}
 	})
 
+	t.Run("6 when a migration takes a heavier lock than allowed", func(t *testing.T) {
+		t.Parallel()
+
+		dsn := testdb.Fresh(t)
+		dir := project(t, map[string]string{
+			"1_create.up.sql": "CREATE TABLE t (id int PRIMARY KEY, name text);",
+			"2_widen.up.sql":  "ALTER TABLE t ALTER COLUMN name TYPE varchar(80);",
+		})
+
+		got := runMigrator(t, dir, dsn, "up", "--max-lock-level", "share-update-exclusive")
+		if got.code != exitRefused {
+			t.Fatalf("exited %d, want %d; stderr: %s", got.code, exitRefused, got.stderr)
+		}
+
+		// The refusal has to say what to do about it, or it is just a wall.
+		if !strings.Contains(got.stderr, "lock-acknowledged") {
+			t.Errorf("the refusal does not say how to accept it: %s", got.stderr)
+		}
+
+		// And nothing may have run: the first migration is still pending.
+		if code := runMigrator(t, dir, dsn, "status", "--check").code; code != exitPending {
+			t.Errorf("status --check exited %d, want %d — the refusal let something through",
+				code, exitPending)
+		}
+	})
+
+	t.Run("2 on a lock level that is not one", func(t *testing.T) {
+		t.Parallel()
+
+		dsn := testdb.Fresh(t)
+
+		got := runMigrator(t, project(t, twoTables), dsn, "up", "--max-lock-level", "very-exclusive")
+		if got.code != exitUsage {
+			t.Errorf("exited %d, want %d; stderr: %s", got.code, exitUsage, got.stderr)
+		}
+
+		if !strings.Contains(got.stderr, "access-exclusive") {
+			t.Errorf("the error does not list the valid levels: %s", got.stderr)
+		}
+	})
+
 	t.Run("4 on drift", func(t *testing.T) {
 		t.Parallel()
 

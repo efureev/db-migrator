@@ -59,6 +59,7 @@ func ExitCode(err error) int {
 	case errors.Is(err, migrator.ErrDownNotAllowed),
 		errors.Is(err, migrator.ErrProductionGuard),
 		errors.Is(err, migrator.ErrWipeRefused),
+		errors.Is(err, migrator.ErrLockTooHeavy),
 		errors.Is(err, migrator.ErrNotConfirmed):
 		return ExitRefused
 
