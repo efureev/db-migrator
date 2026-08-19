@@ -78,7 +78,7 @@ jobs:
           echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Distroless image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: distroless
@@ -94,7 +94,7 @@ jobs:
             ghcr.io/efureev/migrator:latest
 
       - name: Alpine image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: shell
