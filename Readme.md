@@ -137,8 +137,10 @@ migration if you are not.
 | `status` | what is applied and what is pending; `--check` for CI, `--current` for scripts |
 | `validate` | every problem at once; `--strict`, `--offline` |
 | `create` | write a new pair of files; needs no database |
+| `adopt` | record what an existing database already has, without running it |
 | `repair` | fix the journal without touching the schema |
 | `wipe` | drop everything in the schema; three separate guards |
+| `locks` | who holds the migration lock, and for how long |
 | `config` | the resolved configuration and where each value came from |
 | `version` | the version of the binary |
 
@@ -228,7 +230,8 @@ integration level that requires a real PostgreSQL, and an `e2e` package that
 runs the built binary as a subprocess. The integration level refuses to skip
 itself in CI: a silently skipped level looks exactly like a green run.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [UPGRADE.md](UPGRADE.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [UPGRADE.md](UPGRADE.md) and
+[docs/ROADMAP.md](docs/ROADMAP.md) — where this is going, and what it will not become.
 
 ## License
 

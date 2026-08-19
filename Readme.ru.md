@@ -110,8 +110,10 @@ report, err := m.Up(ctx)
 | `status` | что применено и что ждёт; `--check` для CI, `--current` для скриптов |
 | `validate` | все проблемы разом; `--strict`, `--offline` |
 | `create` | создать пару файлов; БД не нужна |
+| `adopt` | принять существующую базу: записать применённое, ничего не выполняя |
 | `repair` | починить журнал, не трогая схему |
 | `wipe` | снести всё в схеме; трое независимых ворот |
+| `locks` | кто держит лок миграций и как долго |
 | `config` | разрешённая конфигурация и происхождение каждого значения |
 | `version` | версия бинарника |
 
@@ -161,7 +163,8 @@ make test-integration  # интеграционные тесты поверх н
 make coverage          # пороги покрытия по пакетам
 ```
 
-См. [CONTRIBUTING.md](CONTRIBUTING.md) и [UPGRADE.md](UPGRADE.md).
+См. [CONTRIBUTING.md](CONTRIBUTING.md), [UPGRADE.md](UPGRADE.md) и
+[docs/ROADMAP.md](docs/ROADMAP.md) — куда инструмент идёт и чего делать не будет.
 
 ## Лицензия
 

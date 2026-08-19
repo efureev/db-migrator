@@ -62,11 +62,31 @@ before a release rather than after.
 - **`validate`**, reporting every problem at once, and **`repair`**, which edits
   the journal and never the schema — so that no `--force` on `up` has to exist.
 - **Seven exit codes**, so that CI can tell "retry" from "wake somebody up".
-- **`--json`** on every command.
+- **`--json`** on every command, every object carrying `"format": 1` so that a
+  consumer can tell one release's shape from another's.
 - **Three levels of test**: unit, integration against a real PostgreSQL on
   14/17/18, and an `e2e` package that runs the built binary as a subprocess.
 - **CI that runs on every push**, with per-package coverage thresholds.
 - **`darwin/arm64` binaries**, which 1.x never shipped.
+
+### Added since the first draft of 2.0
+
+- **`adopt`** — records the migrations an existing database already has, without
+  running them, so that a database built by hand or by golang-migrate can be
+  handed over. Rows stay marked as adopted forever: "applied" and "we were told
+  it was applied" are different claims.
+- **The journal upgrades itself.** `CREATE TABLE IF NOT EXISTS` does nothing to a
+  table that already exists, so a release that added a column would have failed
+  on every installation with "column does not exist". Missing columns are now
+  added, additively, on every run — and a table under our name that is *not*
+  ours (golang-migrate's shares it) is refused rather than altered.
+- **`locks`** — who holds the advisory lock, and for how long.
+- **A privilege preflight**, so that a missing GRANT is a refusal that changed
+  nothing rather than a failure three migrations in.
+- **`wipe` refuses when another schema depends on this one**, listing what
+  `CASCADE` would have taken with it. `WithForceWipe` accepts it deliberately.
+- **`"format": 1`** on every `--json` object, so a consumer can tell one
+  release's shape from another's.
 
 ### Removed
 

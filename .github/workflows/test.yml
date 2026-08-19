@@ -90,6 +90,12 @@ jobs:
           # выглядит он как зелёный прогон.
           MIGRATOR_TEST_DSN: postgres://migrator:migrator@127.0.0.1:5432/migrator_test?sslmode=disable
         run: go test -tags integration -race -shuffle=on ./...
+      - name: Пороги покрытия
+        if: matrix.postgres == '18'
+        env:
+          MIGRATOR_TEST_DSN: postgres://migrator:migrator@127.0.0.1:5432/migrator_test?sslmode=disable
+        run: ./coverage.sh
+
       - name: Артефакты упавших тестов
         if: failure()
         uses: actions/upload-artifact@v4

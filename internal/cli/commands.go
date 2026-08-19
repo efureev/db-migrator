@@ -18,7 +18,7 @@ import (
 func init() {
 	registry = []command{
 		upCmd, downCmd, redoCmd, statusCmd, validateCmd,
-		createCmd, repairCmd, wipeCmd, configCmd, versionCmd, helpCmd,
+		createCmd, adoptCmd, repairCmd, wipeCmd, locksCmd, configCmd, versionCmd, helpCmd,
 	}
 }
 
@@ -292,7 +292,7 @@ hour.
 				return err
 			}
 
-			report := migrator.ValidateSource(set, *strict)
+			report := set.Validate(*strict)
 
 			if err := e.ui.Render(report); err != nil {
 				return err
@@ -378,6 +378,72 @@ Writes <version>_<name>.up.sql and its down file. No database is opened.
 	},
 }
 
+var adoptCmd = command{
+	name: "adopt", summary: "record existing migrations as applied without running them", needsDB: true,
+	usage: func(w io.Writer) {
+		fmt.Fprint(w, `migrator adopt (--baseline <version> | --from-golang-migrate)
+                [--confirm <database>] [--dry-run] [--force]
+
+Writes the journal that would have existed had this tool built the schema, and
+runs no migration SQL at all.
+
+This is how a database that already has a schema — built by hand, by
+golang-migrate, or by an earlier tool — is handed to this one. Without it, "up"
+would try to apply migration 1 against tables that already exist.
+
+Adoption takes your word that the schema matches the files. That word is the
+whole risk, so the rows are marked: status shows them as "adopted" forever,
+because "applied" and "we were told it was applied" are different claims and
+only one of them was observed here. Check the schema first.
+
+  --baseline <v>          record every migration up to and including v
+  --from-golang-migrate   read the version out of an existing (version, dirty)
+                          journal and move that table aside as
+                          <table>_pre_v2 rather than dropping it
+  --confirm <db>          the database name; required outside development
+  --dry-run               list what would be recorded and record nothing
+  --force                 adopt over a journal that already has rows
+`)
+	},
+	run: func(e *env, args []string) error {
+		fs := flagSet("adopt")
+		baseline := fs.Int64("baseline", 0, "")
+		fromLegacy := fs.Bool("from-golang-migrate", false, "")
+		confirm := fs.String("confirm", "", "")
+		dryRun := fs.Bool("dry-run", false, "")
+		force := fs.Bool("force", false, "")
+
+		if err := fs.Parse(args); err != nil {
+			return joinUsage(err)
+		}
+
+		if !given(fs, "baseline") && !*fromLegacy {
+			return usageErrorf("adopt needs --baseline <version> or --from-golang-migrate")
+		}
+
+		if given(fs, "baseline") && *fromLegacy {
+			return usageErrorf("--baseline and --from-golang-migrate cannot both be given")
+		}
+
+		m, err := e.open()
+		if err != nil {
+			return err
+		}
+
+		report, err := m.Adopt(e.ctx, confirmation(*confirm), migrator.AdoptOptions{
+			Baseline:          *baseline,
+			FromGolangMigrate: *fromLegacy,
+			Force:             *force,
+			DryRun:            *dryRun,
+		})
+		if err != nil {
+			return err
+		}
+
+		return e.ui.Render(report)
+	},
+}
+
 var repairCmd = command{
 	name: "repair", summary: "fix the journal without touching the schema", needsDB: true,
 	usage: func(w io.Writer) {
@@ -444,15 +510,13 @@ available in every environment — including the one where it is needed most.
 			return err
 		}
 
-		for _, r := range report.Repairs {
-			e.ui.Line("  " + r.String())
-		}
-
-		if len(report.Repairs) == 0 {
+		if len(report.Repairs) == 0 && !e.ui.JSON() {
 			e.ui.Line("  Nothing to repair.")
+
+			return nil
 		}
 
-		return nil
+		return e.ui.Render(report)
 	},
 }
 
@@ -505,27 +569,51 @@ means "I know which database this is", and a typo in the name is what saves you.
 			return fmt.Errorf("%w: pass --confirm <database>", migrator.ErrNotConfirmed)
 		}
 
-		report, err := m.Wipe(e.ctx, migrator.Confirm(*confirm))
+		report, err := m.Wipe(e.ctx, confirmation(*confirm))
 		if err != nil {
 			return err
 		}
 
-		verb := "dropped "
-		if report.DryRun {
-			verb = "would drop "
+		return e.ui.Render(report)
+	},
+}
+
+var locksCmd = command{
+	name: "locks", summary: "show who holds the migration lock", needsDB: true,
+	usage: func(w io.Writer) {
+		fmt.Fprint(w, `migrator locks
+
+Shows who holds the advisory lock this project serialises migrations on, and
+for how long.
+
+"Another migration run holds the lock" is a true answer that leads nowhere: the
+next question is always which one. Answering it otherwise means remembering
+that the lock identifier is derived from the schema and table names and writing
+the join against pg_locks by hand, at the hour when that is hardest.
+
+Advisory locks are cluster-wide, so a holder may be connected to a different
+database on the same server. That is reported rather than hidden.
+
+Takes no lock and writes nothing.
+`)
+	},
+	run: func(e *env, args []string) error {
+		fs := flagSet("locks")
+		if err := fs.Parse(args); err != nil {
+			return joinUsage(err)
 		}
 
-		for _, o := range report.Dropped {
-			e.ui.Line("  " + verb + o.String())
+		m, err := e.open()
+		if err != nil {
+			return err
 		}
 
-		for _, o := range report.Kept {
-			e.ui.Line("  kept    " + o.String())
+		report, err := m.Locks(e.ctx)
+		if err != nil {
+			return err
 		}
 
-		e.ui.Line("\n  " + report.String())
-
-		return nil
+		return e.ui.Render(report)
 	},
 }
 
@@ -638,6 +726,16 @@ Exit codes:
 
 Run "migrator help <command>" for the details of one command.
 `)
+}
+
+// confirmation turns the --confirm flag into a Confirmation, distinguishing
+// "not given" from "given as the empty string".
+func confirmation(name string) migrator.Confirmation {
+	if name == "" {
+		return migrator.Confirmation{}
+	}
+
+	return migrator.Confirm(name)
 }
 
 // targetOf turns the --to and --steps flags into a Target.

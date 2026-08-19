@@ -66,6 +66,15 @@ func ExitCode(err error) int {
 		errors.Is(err, migrator.ErrSessionNotPinned):
 		return ExitLocked
 
+	// A missing privilege and a foreign journal are both "somebody has to
+	// change something outside this database" — retrying changes nothing, and
+	// neither is a drift between files and journal.
+	case errors.Is(err, migrator.ErrInsufficientPrivilege),
+		errors.Is(err, migrator.ErrForeignJournal),
+		errors.Is(err, migrator.ErrAlreadyAdopted),
+		errors.Is(err, migrator.ErrDirtyJournal):
+		return ExitRefused
+
 	case errors.Is(err, migrator.ErrChecksumMismatch),
 		errors.Is(err, migrator.ErrMissingMigration),
 		errors.Is(err, migrator.ErrIncomplete),
@@ -86,6 +95,7 @@ func ExitCode(err error) int {
 		errors.Is(err, migrator.ErrMissingDownFile),
 		errors.Is(err, migrator.ErrInvalidIdentifier),
 		errors.Is(err, migrator.ErrBadName),
+		errors.Is(err, migrator.ErrNoBaseline),
 		errors.Is(err, errUsage):
 		return ExitUsage
 

@@ -221,8 +221,8 @@ func TestNormalise(t *testing.T) {
 	}
 
 	for in, want := range cases {
-		if got := Normalise([]byte(in)); got != want {
-			t.Errorf("Normalise(%q) = %q, want %q", in, got, want)
+		if got := normalise([]byte(in)); got != want {
+			t.Errorf("normalise(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -239,17 +239,17 @@ func TestChecksumIgnoresLineEndings(t *testing.T) {
 	trailing := []byte("CREATE TABLE a (\n  id int\n);\n\n\n")
 	spaces := []byte("CREATE TABLE a (   \n  id int\t\n);\n")
 
-	want := Checksum(unix)
+	want := checksum(unix)
 	for name, body := range map[string][]byte{
 		"CRLF": windows, "BOM": withBOM, "trailing newlines": trailing, "trailing spaces": spaces,
 	} {
-		if got := Checksum(body); got != want {
+		if got := checksum(body); got != want {
 			t.Errorf("%s changed the checksum: %s vs %s", name, got, want)
 		}
 	}
 
 	// A real edit must still change it, or the mechanism protects nothing.
-	if Checksum([]byte("CREATE TABLE a (\n  id bigint\n);\n")) == want {
+	if checksum([]byte("CREATE TABLE a (\n  id bigint\n);\n")) == want {
 		t.Error("changing int to bigint did not change the checksum")
 	}
 }
@@ -270,9 +270,9 @@ func TestChecksumIsStable(t *testing.T) {
 		want = "a15ebcab704727eefd822a74c96ecc837377c7f9028269f520d6d24ff372f0f2"
 	)
 
-	got := Checksum([]byte(body))
+	got := checksum([]byte(body))
 	if got != want {
-		t.Errorf("Checksum(%q) = %q\n"+
+		t.Errorf("checksum(%q) = %q\n"+
 			"want %q\n"+
 			"If this is intentional, it is a BREAKING change: every checksum "+
 			"recorded in every database stops matching.", body, got, want)
@@ -285,7 +285,7 @@ func TestParseDirectives(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
 		t.Parallel()
 
-		d, err := ParseDirectives("SELECT 1;")
+		d, err := parseDirectives("SELECT 1;")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +298,7 @@ func TestParseDirectives(t *testing.T) {
 	t.Run("all of them", func(t *testing.T) {
 		t.Parallel()
 
-		d, err := ParseDirectives(
+		d, err := parseDirectives(
 			"-- migrator:no-transaction\n" +
 				"-- migrator:retry-safe\n" +
 				"-- migrator:statement-timeout 30m\n" +
@@ -331,7 +331,7 @@ func TestParseDirectives(t *testing.T) {
 
 		// A directive below the first SQL token cannot retroactively change how
 		// the statements above it ran, so it is not a directive at all.
-		d, err := ParseDirectives("SELECT 1;\n-- migrator:no-transaction\nSELECT 2;")
+		d, err := parseDirectives("SELECT 1;\n-- migrator:no-transaction\nSELECT 2;")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -344,7 +344,7 @@ func TestParseDirectives(t *testing.T) {
 	t.Run("ordinary comments are left alone", func(t *testing.T) {
 		t.Parallel()
 
-		d, err := ParseDirectives("-- add the index the report needs\nSELECT 1;")
+		d, err := parseDirectives("-- add the index the report needs\nSELECT 1;")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,7 +357,7 @@ func TestParseDirectives(t *testing.T) {
 	t.Run("unknown directive is an error", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := ParseDirectives("-- migrator:no-transacton\nSELECT 1;")
+		_, err := parseDirectives("-- migrator:no-transacton\nSELECT 1;")
 		if !errors.Is(err, ErrUnknownDirective) {
 			t.Fatalf("error = %v, want %v", err, ErrUnknownDirective)
 		}
@@ -371,7 +371,7 @@ func TestParseDirectives(t *testing.T) {
 	t.Run("every bad directive is reported", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := ParseDirectives(
+		_, err := parseDirectives(
 			"-- migrator:nope\n-- migrator:lock-timeout soon\nSELECT 1;")
 
 		for _, want := range []error{ErrUnknownDirective, ErrBadDirective} {
@@ -390,7 +390,7 @@ func TestDirectivesAreInTheChecksum(t *testing.T) {
 	plain := []byte("CREATE INDEX i ON t (c);\n")
 	directed := []byte("-- migrator:no-transaction\nCREATE INDEX i ON t (c);\n")
 
-	if Checksum(plain) == Checksum(directed) {
+	if checksum(plain) == checksum(directed) {
 		t.Error("adding a directive did not change the checksum")
 	}
 }

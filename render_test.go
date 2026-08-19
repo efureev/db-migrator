@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -292,7 +293,7 @@ func TestReportStringAndLogValue(t *testing.T) {
 		seen[attr.Key] = true
 	}
 
-	for _, want := range []string{"direction", "applied", "duration", "current", "dry_run"} {
+	for _, want := range []string{"direction", "applied", "duration", "current"} {
 		if !seen[want] {
 			t.Errorf("LogValue has no %q attribute", want)
 		}
@@ -410,7 +411,7 @@ func TestWipeReportRendering(t *testing.T) {
 
 	r := &WipeReport{
 		Database: "shop_dev",
-		Schemas:  []string{"public"},
+		Schema:   "public",
 		Dropped:  []Object{{Schema: "public", Name: "users", Kind: "table"}},
 		Kept:     []Object{{Schema: "public", Name: "gin_trgm_ops", Kind: "routine", Reason: "owned by another role"}},
 	}
@@ -782,5 +783,146 @@ func TestOneTransactionIsNotAlwaysTrue(t *testing.T) {
 
 	if oneTx(nonTx) {
 		t.Error("a no-transaction migration is no transaction")
+	}
+}
+
+// TestStatusShowsTagsAndAdoption: both were parsed and recorded and shown
+// nowhere. A doc comment promising "reported by status" that status does not
+// honour is worse than not having the field.
+func TestStatusShowsTagsAndAdoption(t *testing.T) {
+	t.Parallel()
+
+	set := mustLoad(t, map[string]string{
+		"1_slow_ddl.up.sql": "-- migrator:tags ddl,slow\nCREATE TABLE a (id int);",
+	})
+
+	mig, _ := set.ByVersion(1)
+	at := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+
+	status := &Status{
+		Schema: "public", Table: "schema_migrations", Initialised: true,
+		Entries: []Entry{{
+			Version: 1, Name: "slow_ddl", State: StateApplied,
+			Migration: &mig,
+			Record: &Record{
+				Version: 1, AppliedAt: at, FinishedAt: &at, AdoptedAt: &at, Checksum: mig.Checksum,
+			},
+		}},
+	}
+
+	var text strings.Builder
+	if err := status.Text(&text); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"[ddl,slow]", "(adopted)"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("the table does not show %q:\n%s", want, text.String())
+		}
+	}
+
+	var raw strings.Builder
+	if err := status.JSON(&raw); err != nil {
+		t.Fatal(err)
+	}
+
+	var out struct {
+		Entries []struct {
+			Tags    []string `json:"tags"`
+			Adopted bool     `json:"adopted"`
+		} `json:"entries"`
+	}
+
+	if err := json.Unmarshal([]byte(raw.String()), &out); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	if len(out.Entries) != 1 || len(out.Entries[0].Tags) != 2 || !out.Entries[0].Adopted {
+		t.Errorf("JSON decoded %+v", out)
+	}
+}
+
+// TestJSONCarriesItsFormat: without a version a consumer cannot tell 2.0's
+// output from 2.3's and breaks silently — the class of failure the rest of this
+// tool exists to prevent.
+func TestJSONCarriesItsFormat(t *testing.T) {
+	t.Parallel()
+
+	renderers := map[string]interface{ JSON(io.Writer) error }{
+		"Report":           sampleReport(),
+		"Status":           sampleStatus(),
+		"ValidationReport": &ValidationReport{},
+		"WipeReport":       &WipeReport{Database: "shop_dev", Schema: "public"},
+	}
+
+	for name, r := range renderers {
+		var b bytes.Buffer
+		if err := r.JSON(&b); err != nil {
+			t.Fatalf("%s.JSON: %v", name, err)
+		}
+
+		var out struct {
+			Format int `json:"format"`
+		}
+
+		if err := json.Unmarshal(b.Bytes(), &out); err != nil {
+			t.Fatalf("%s wrote invalid JSON: %v", name, err)
+		}
+
+		if out.Format != JSONFormat {
+			t.Errorf("%s reports format %d, want %d", name, out.Format, JSONFormat)
+		}
+	}
+}
+
+// TestWipeReportRendersBothWays: wipe --json used to print a plain-text list,
+// because WipeReport had no JSON method and the command wrote lines by hand.
+func TestWipeReportRendersBothWays(t *testing.T) {
+	t.Parallel()
+
+	r := &WipeReport{
+		Database: "shop_dev", Schema: "public", DryRun: true,
+		Dropped: []Object{{Schema: "public", Name: "users", Kind: "table"}},
+		Kept:    []Object{{Schema: "public", Name: "gin_trgm_ops", Kind: "routine", Reason: "owned by another role"}},
+	}
+
+	var text bytes.Buffer
+	if err := r.Text(&text); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"would drop", "public.users", "kept", "would be dropped"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("text output lacks %q:\n%s", want, text.String())
+		}
+	}
+
+	var raw bytes.Buffer
+	if err := r.JSON(&raw); err != nil {
+		t.Fatal(err)
+	}
+
+	var out struct {
+		Database string `json:"database"`
+		DryRun   bool   `json:"dry_run"`
+		Dropped  []struct {
+			Name string `json:"name"`
+			Kind string `json:"kind"`
+		} `json:"dropped"`
+		Kept []struct {
+			Reason string `json:"reason"`
+		} `json:"kept"`
+	}
+
+	if err := json.Unmarshal(raw.Bytes(), &out); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if out.Database != "shop_dev" || !out.DryRun || len(out.Dropped) != 1 || len(out.Kept) != 1 {
+		t.Errorf("decoded %+v", out)
+	}
+
+	if out.Kept[0].Reason == "" {
+		t.Error("a kept object does not say why it was kept")
 	}
 }

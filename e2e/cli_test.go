@@ -38,7 +38,17 @@ const (
 	exitRefused = 6
 )
 
-var binary string
+var (
+	binary string
+	// coverDir is where the instrumented binary writes its coverage, when the
+	// test run itself was built with coverage.
+	//
+	// Without this the CLI looks barely tested: everything reached through the
+	// binary runs in another process, and Go collects nothing from a subprocess
+	// unless it is built with -cover and told where to put the data. The
+	// threshold for internal/cli used to carry an apology about it.
+	coverDir string
+)
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "migrator-e2e-*")
@@ -48,9 +58,27 @@ func TestMain(m *testing.M) {
 
 	binary = filepath.Join(dir, "migrator")
 
+	args := []string{"build", "-o", binary}
+
+	// An explicit variable set by coverage.sh, not GOCOVERDIR: `go test` does
+	// not put GOCOVERDIR into the test process's environment, so reading it
+	// here would silently never fire — which is exactly the shape of bug this
+	// whole exercise is about.
+	if out := os.Getenv("MIGRATOR_E2E_COVERDIR"); out != "" {
+		coverDir = out
+
+		// -covermode=atomic must match what the test run uses, or covdata
+		// refuses to merge the two with "counter mode clash".
+		args = append(args,
+			"-cover", "-covermode=atomic",
+			"-coverpkg=github.com/efureev/db-migrator/v2/...")
+	}
+
+	args = append(args, "../cmd/migrator")
+
 	buildCtx, cancelBuild := context.WithTimeout(context.Background(), 5*time.Minute)
 
-	build := exec.CommandContext(buildCtx, "go", "build", "-o", binary, "../cmd/migrator")
+	build := exec.CommandContext(buildCtx, "go", args...)
 	build.Stderr = os.Stderr
 
 	err = build.Run()
@@ -88,6 +116,10 @@ func runMigrator(t *testing.T, dir, dsn string, args ...string) result {
 		// Colour would put escape sequences into every assertion.
 		"NO_COLOR=1",
 	)
+
+	if coverDir != "" {
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+coverDir)
+	}
 
 	var out, errw bytes.Buffer
 

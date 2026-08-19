@@ -2,7 +2,9 @@ package migrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 
@@ -56,11 +58,18 @@ func (o Object) String() string {
 type WipeReport struct {
 	// Database is the database it ran against.
 	Database string
-	// Schemas are the schemas it emptied.
-	Schemas []string
+	// Schema is the schema it emptied. Singular: a Migrator is built over one
+	// schema, and a field that is always a one-element slice invites code that
+	// pretends otherwise.
+	Schema string
 	// Dropped and Kept are the objects it removed and the objects it left.
 	Dropped []Object
 	Kept    []Object
+	// Dependents are objects in *other* schemas that depend on this one, and
+	// that DROP ... CASCADE would therefore take with it. They are the reason a
+	// wipe can refuse: a view two schemas away vanishing because somebody reset
+	// their development schema is not something to discover later.
+	Dependents []Object
 	// DryRun reports a wipe that decided what to drop and dropped nothing.
 	DryRun bool
 }
@@ -73,6 +82,136 @@ func (r *WipeReport) String() string {
 	}
 
 	return fmt.Sprintf("%d objects %s, %d kept in %s", len(r.Dropped), verb, len(r.Kept), r.Database)
+}
+
+// Text writes the report as a person reads it.
+func (r *WipeReport) Text(w io.Writer) error {
+	var b strings.Builder
+
+	verb := "dropped"
+	if r.DryRun {
+		verb = "would drop"
+	}
+
+	for _, o := range r.Dropped {
+		fmt.Fprintf(&b, "  %-10s %s\n", verb, o)
+	}
+
+	for _, o := range r.Kept {
+		fmt.Fprintf(&b, "  %-10s %s\n", "kept", o)
+	}
+
+	for _, o := range r.Dependents {
+		fmt.Fprintf(&b, "  %-10s %s\n", "dependent", o)
+	}
+
+	fmt.Fprintf(&b, "\n  %s\n", r)
+
+	_, err := io.WriteString(w, b.String())
+
+	return err
+}
+
+// JSON writes the report in the shape a CI step parses.
+func (r *WipeReport) JSON(w io.Writer) error {
+	type object struct {
+		Schema string `json:"schema"`
+		Name   string `json:"name"`
+		Kind   string `json:"kind"`
+		Reason string `json:"reason,omitempty"`
+	}
+
+	out := struct {
+		Format   int      `json:"format"`
+		Database string   `json:"database"`
+		Schema   string   `json:"schema"`
+		DryRun   bool     `json:"dry_run"`
+		Dropped  []object `json:"dropped"`
+		Kept     []object `json:"kept"`
+	}{
+		Format: JSONFormat, Database: r.Database, Schema: r.Schema, DryRun: r.DryRun,
+		Dropped: make([]object, 0, len(r.Dropped)),
+		Kept:    make([]object, 0, len(r.Kept)),
+	}
+
+	for _, o := range r.Dropped {
+		out.Dropped = append(out.Dropped, object{Schema: o.Schema, Name: o.Name, Kind: o.Kind})
+	}
+
+	for _, o := range r.Kept {
+		out.Kept = append(out.Kept, object{Schema: o.Schema, Name: o.Name, Kind: o.Kind, Reason: o.Reason})
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+
+	return enc.Encode(out)
+}
+
+// dependenciesOutside reports objects in other schemas that depend on this one.
+//
+// DROP ... CASCADE is silent about what it takes. A view in another schema
+// selecting from a table here disappears with it, and nothing in the output of
+// a successful wipe would ever mention it.
+func (m *Migrator) dependenciesOutside(ctx context.Context, s Session) ([]Object, error) {
+	const q = `
+SELECT DISTINCT dn.nspname::text AS schema,
+       dc.relname::text          AS name,
+       CASE dc.relkind WHEN 'm' THEN 'materialized view' WHEN 'v' THEN 'view'
+                       WHEN 'S' THEN 'sequence' ELSE 'table' END AS kind
+  FROM pg_depend d
+  JOIN pg_rewrite r  ON r.oid = d.objid
+  JOIN pg_class dc   ON dc.oid = r.ev_class
+  JOIN pg_namespace dn ON dn.oid = dc.relnamespace
+  JOIN pg_class rc   ON rc.oid = d.refobjid
+  JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+ WHERE d.classid = 'pg_rewrite'::regclass
+   AND d.refclassid = 'pg_class'::regclass
+   AND rn.nspname = $1
+   AND dn.nspname <> $1
+ ORDER BY schema, name`
+
+	rows, err := s.Query(ctx, q, m.cfg.schema)
+	if err != nil {
+		return nil, fmt.Errorf("migrator: look for dependants outside the schema: %w", redact(err))
+	}
+	defer rows.Close()
+
+	var out []Object
+
+	for rows.Next() {
+		var o Object
+		if err := rows.Scan(&o.Schema, &o.Name, &o.Kind); err != nil {
+			return nil, fmt.Errorf("migrator: look for dependants outside the schema: %w", redact(err))
+		}
+
+		o.Reason = "depends on " + m.cfg.schema
+
+		out = append(out, o)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("migrator: look for dependants outside the schema: %w", redact(err))
+	}
+
+	return out, nil
+}
+
+// joinObjects renders a short list of objects for an error message.
+func joinObjects(objects []Object) string {
+	const limit = 5
+
+	names := make([]string, 0, min(len(objects), limit))
+	for _, o := range objects[:min(len(objects), limit)] {
+		names = append(names, o.Kind+" "+o.Schema+"."+o.Name)
+	}
+
+	s := strings.Join(names, ", ")
+	if len(objects) > limit {
+		s += fmt.Sprintf(" and %d more", len(objects)-limit)
+	}
+
+	return s
 }
 
 // systemSchemas are never touched, whatever the configuration says.
@@ -128,11 +267,29 @@ func (m *Migrator) Wipe(ctx context.Context, c Confirmation) (*WipeReport, error
 	}
 	defer release()
 
-	report := &WipeReport{Database: database, Schemas: []string{m.cfg.schema}}
+	report := &WipeReport{Database: database, Schema: m.cfg.schema}
 
 	objects, err := m.wipeTargets(ctx, s)
 	if err != nil {
 		return nil, err
+	}
+
+	outside, err := m.dependenciesOutside(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(outside) > 0 {
+		report.Dependents = outside
+
+		if !m.cfg.forceWipe {
+			return report, fmt.Errorf("%w: %d object(s) outside %q depend on this schema and "+
+				"CASCADE would take them too: %s — pass WithForceWipe to accept that",
+				ErrWipeRefused, len(outside), m.cfg.schema, joinObjects(outside))
+		}
+
+		m.cfg.logger.Warn("migrator: dropping objects outside the schema along with it",
+			"count", len(outside))
 	}
 
 	if m.cfg.dryRun {

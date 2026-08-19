@@ -61,7 +61,7 @@ func TestCreate(t *testing.T) {
 		t.Error("the up template does not mention the directives at all")
 	}
 
-	directives, err := ParseDirectives(Normalise(up))
+	directives, err := parseDirectives(normalise(up))
 	if err != nil {
 		t.Fatalf("the template does not parse: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestValidateSource(t *testing.T) {
 		"2_b.up.sql": "SELECT 1;", // no down file
 	})
 
-	lenient := ValidateSource(set, false)
+	lenient := set.Validate(false)
 	if !lenient.OK() {
 		t.Errorf("a missing down file is not an error by default: %v", lenient.Problems())
 	}
@@ -273,7 +273,7 @@ func TestValidateSource(t *testing.T) {
 		t.Errorf("problems = %v", lenient.Problems())
 	}
 
-	strict := ValidateSource(set, true)
+	strict := set.Validate(true)
 	if strict.OK() {
 		t.Error("--strict should turn a missing down file into an error")
 	}

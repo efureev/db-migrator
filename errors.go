@@ -55,6 +55,15 @@ var (
 	ErrUnresolvedPlaceholder = errors.New("migrator: placeholder left unresolved")
 	// ErrBookkeeping reports a bookkeeping table that exists but is unusable.
 	ErrBookkeeping = errors.New("migrator: bookkeeping table is not usable")
+	// ErrInsufficientPrivilege reports a role that cannot do what the run needs.
+	// It is checked before the run starts: finding out on the third migration
+	// leaves two applied and a half-migrated database.
+	ErrInsufficientPrivilege = errors.New("migrator: the role lacks a privilege the run needs")
+	// ErrForeignJournal reports a table under this tool's name that belongs to
+	// something else — golang-migrate's journal shares the default name. Adding
+	// our columns to it would corrupt it and dropping it would lose its history,
+	// so the run stops and points at adopt.
+	ErrForeignJournal = errors.New("migrator: the journal table belongs to another tool")
 	// ErrNothingToDo reports a run with no work in it. It is returned only
 	// where a caller asked for a specific step that does not exist; Up reports
 	// an empty Report and a nil error.

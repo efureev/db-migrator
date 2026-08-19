@@ -4,6 +4,7 @@ package migrator_test
 
 import (
 	"errors"
+	"hash/fnv"
 	"strings"
 	"testing"
 	"time"
@@ -865,3 +866,256 @@ func TestRunSettingsAreRestoredNotReset(t *testing.T) {
 		t.Errorf("statement_timeout is %q after the run, want the session's own 30s", after)
 	}
 }
+
+// TestBookkeepingUpgradesItself is the point of the two-step bootstrap.
+//
+// CREATE TABLE IF NOT EXISTS does nothing at all to a table that already
+// exists, including one written by an older release. Without the ALTER step,
+// the first version that added a column would fail on every existing
+// installation with "column does not exist", and the fix would be a
+// hand-written ALTER TABLE in a changelog entry.
+func TestBookkeepingUpgradesItself(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+
+	// A journal as an early version of this tool would have left it.
+	testdb.Exec(t, dsn, `
+		CREATE TABLE public.schema_migrations (
+			version  BIGINT PRIMARY KEY,
+			name     TEXT NOT NULL,
+			checksum TEXT NOT NULL
+		)`)
+	testdb.Exec(t, dsn,
+		`INSERT INTO public.schema_migrations (version, name, checksum) VALUES (1, 'create_a', 'stale')`)
+
+	m := newMigrator(t, dsn, map[string]string{
+		"1_create_a.up.sql": "CREATE TABLE a (id int PRIMARY KEY);",
+		"2_create_b.up.sql": "CREATE TABLE b (id int PRIMARY KEY);",
+	})
+
+	// The old row's checksum does not match, so the run must refuse — but it
+	// must refuse for that reason, having successfully read a table it just
+	// upgraded, rather than failing on a missing column.
+	_, err := m.Up(ctx(t))
+	if !errors.Is(err, migrator.ErrChecksumMismatch) {
+		t.Fatalf("Up error = %v, want a checksum mismatch (i.e. the journal was readable)", err)
+	}
+
+	for _, column := range []string{"down_checksum", "finished_at", "transactional", "adopted_at"} {
+		n := testdb.QueryInt(t, dsn, `
+			SELECT count(*) FROM information_schema.columns
+			 WHERE table_schema = 'public' AND table_name = 'schema_migrations' AND column_name = $1`, column)
+		if n != 1 {
+			t.Errorf("column %q was not added by the upgrade", column)
+		}
+	}
+
+	// The history survived the upgrade: that is the whole reason the table is
+	// altered rather than recreated.
+	if n := testdb.QueryInt(t, dsn, `SELECT count(*) FROM public.schema_migrations`); n != 1 {
+		t.Errorf("the upgrade lost rows: %d remain, want 1", n)
+	}
+}
+
+// TestBootstrapIsIdempotent: a second run must add nothing and change nothing.
+func TestBootstrapIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	m := newMigrator(t, dsn, twoTables)
+
+	if _, err := m.Up(ctx(t)); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	before := testdb.QueryInt(t, dsn, `
+		SELECT count(*) FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = 'schema_migrations'`)
+
+	if _, err := m.Up(ctx(t)); err != nil {
+		t.Fatalf("second Up: %v", err)
+	}
+
+	after := testdb.QueryInt(t, dsn, `
+		SELECT count(*) FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = 'schema_migrations'`)
+
+	if before != after {
+		t.Errorf("a second bootstrap changed the column count: %d then %d", before, after)
+	}
+}
+
+// TestForeignJournalIsRefused: golang-migrate's journal shares our default
+// name. Adding our columns to it would corrupt it; dropping it would lose its
+// history. Neither is ours to do.
+func TestForeignJournalIsRefused(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+
+	testdb.Exec(t, dsn, `
+		CREATE TABLE public.schema_migrations (
+			version BIGINT PRIMARY KEY,
+			dirty   BOOLEAN NOT NULL
+		)`)
+	testdb.Exec(t, dsn, `INSERT INTO public.schema_migrations VALUES (20240101120000, false)`)
+
+	m := newMigrator(t, dsn, twoTables)
+
+	_, err := m.Up(ctx(t))
+	if !errors.Is(err, migrator.ErrForeignJournal) {
+		t.Fatalf("Up error = %v, want %v", err, migrator.ErrForeignJournal)
+	}
+
+	// It must point somewhere useful rather than just refusing.
+	if !strings.Contains(err.Error(), "adopt") {
+		t.Errorf("the error does not mention adopt: %v", err)
+	}
+
+	// And it must not have touched their table.
+	n := testdb.QueryInt(t, dsn, `
+		SELECT count(*) FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = 'schema_migrations'`)
+	if n != 2 {
+		t.Errorf("the foreign journal now has %d columns, want the 2 it started with", n)
+	}
+}
+
+// TestLocksNamesTheHolder is the case the command exists for: a deploy is stuck
+// on "another migration run holds the lock", and the next question is which one.
+func TestLocksNamesTheHolder(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+
+	// A lock id of this test's own. Advisory locks are cluster-wide and the id
+	// is derived from schema and table, so every test that leaves those at their
+	// defaults shares one — and Locks deliberately does not filter by database,
+	// because an operator needs to see a holder connected elsewhere. Without
+	// this the test sees a parallel neighbour's lock and fails for a reason
+	// that has nothing to do with what it checks.
+	m := newMigrator(t, dsn, map[string]string{"1_slow.up.sql": "SELECT pg_sleep(3);"},
+		migrator.WithLockID(lockIDFor(t, dsn)))
+
+	free, err := m.Locks(ctx(t))
+	if err != nil {
+		t.Fatalf("Locks: %v", err)
+	}
+
+	if free.Held() {
+		t.Fatalf("the lock is held before anything ran: %v", free.Holders)
+	}
+
+	if free.ClassID == 0 || free.ObjID == 0 {
+		t.Error("the report does not identify the lock")
+	}
+
+	done := make(chan error, 1)
+	go func() { _, err := m.Up(ctx(t)); done <- err }()
+
+	// Poll rather than sleep: a fixed wait races the run's own startup.
+	var held *migrator.LockReport
+
+	for range 60 {
+		got, err := m.Locks(ctx(t))
+		if err != nil {
+			t.Fatalf("Locks: %v", err)
+		}
+
+		if got.Held() {
+			held = got
+
+			break
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if held == nil {
+		t.Fatal("the lock never appeared while a migration was running")
+	}
+
+	h := held.Holders[0]
+	if h.PID == 0 || h.Database == "" {
+		t.Errorf("the holder is not identified: %+v", h)
+	}
+
+	// Enough to act on: a pid to terminate and a query to recognise.
+	if !strings.Contains(held.String(), "held by") {
+		t.Errorf("summary = %q", held.String())
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("the holder failed: %v", err)
+	}
+}
+
+// TestPreflightRefusesBeforeApplyingAnything: discovering a missing privilege
+// on the third migration leaves two applied and a half-migrated database.
+func TestPreflightRefusesBeforeApplyingAnything(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+
+	// A role that may connect and read, and may not create anything.
+	//
+	// The name is random because roles are cluster-wide while the database is
+	// this test's own: a fixed name collides with a parallel run and with the
+	// leftovers of a failed one.
+	database := databaseOf(t, dsn)
+	role := "ro_" + strings.TrimPrefix(database, "mig_")
+
+	testdb.Exec(t, dsn, `CREATE ROLE `+pgxIdent(role)+` LOGIN PASSWORD 'x'`)
+	testdb.Exec(t, dsn, `REVOKE CREATE ON SCHEMA public FROM `+pgxIdent(role)+`, PUBLIC`)
+	testdb.Exec(t, dsn, `REVOKE CREATE ON DATABASE `+pgxIdent(database)+` FROM PUBLIC`)
+	testdb.Exec(t, dsn, `GRANT CONNECT ON DATABASE `+pgxIdent(database)+` TO `+pgxIdent(role))
+
+	t.Cleanup(func() {
+		// DROP OWNED first: a role with a grant on it cannot be dropped, and
+		// the GRANT CONNECT above is exactly such a grant.
+		testdb.Exec(t, dsn, `DROP OWNED BY `+pgxIdent(role))
+		testdb.Exec(t, dsn, `DROP ROLE IF EXISTS `+pgxIdent(role))
+	})
+
+	limited := strings.Replace(dsn, "migrator:migrator@", role+":x@", 1)
+
+	m, err := migrator.New(migrator.FromDSN(limited), src(twoTables))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = m.Up(ctx(t))
+	if !errors.Is(err, migrator.ErrInsufficientPrivilege) {
+		t.Fatalf("Up error = %v, want %v", err, migrator.ErrInsufficientPrivilege)
+	}
+
+	// It must name the role and the schema, or the operator cannot act on it.
+	for _, want := range []string{role, "public"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q: %v", want, err)
+		}
+	}
+
+	// And nothing was created: not the journal, not a table.
+	if testdb.TableExists(t, dsn, "public", "schema_migrations") {
+		t.Error("the refused run created the journal")
+	}
+
+	if testdb.TableExists(t, dsn, "public", "a") {
+		t.Error("the refused run applied a migration")
+	}
+}
+
+// lockIDFor derives a lock id unique to this test's database.
+func lockIDFor(t *testing.T, dsn string) int32 {
+	t.Helper()
+
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(databaseOf(t, dsn)))
+
+	return int32(h.Sum32() & 0x7FFFFFFF)
+}
+
+// pgxIdent quotes an identifier for a statement built in a test.
+func pgxIdent(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }

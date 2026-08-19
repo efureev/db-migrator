@@ -29,8 +29,13 @@ type Migration struct {
 	// build a Migrator.
 	UpFile   string
 	DownFile string
-	// Checksum is the hex sha256 of the normalised up file. See [Normalise] for
-	// what normalised means and why it is part of the contract.
+	// Checksum is the hex sha256 of the normalised up file: BOM stripped, CRLF
+	// folded to LF, trailing blanks removed per line and at the end.
+	//
+	// The normalisation is part of the contract and cannot change without a new
+	// major version — changing it invalidates every checksum recorded in every
+	// database. It exists so that a Windows checkout with core.autocrlf=true
+	// does not read as somebody having edited a released migration.
 	Checksum string
 	// DownChecksum is the same for the down file, or empty when there is none.
 	DownChecksum string
@@ -232,7 +237,7 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 		return Migration{}, []error{&SourceError{File: up.Raw, Detail: err.Error(), Err: ErrBadFilename}}
 	}
 
-	upText := Normalise(upBody)
+	upText := normalise(upBody)
 
 	stmts, err := sqlsplit.Split(upText)
 	if err != nil {
@@ -248,7 +253,7 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 		problems = append(problems, &SourceError{File: up.Raw, Err: ErrEmptyMigration})
 	}
 
-	directives, err := ParseDirectives(upText)
+	directives, err := parseDirectives(upText)
 	if err != nil {
 		problems = append(problems, &SourceError{File: up.Raw, Err: err})
 	}
@@ -257,7 +262,7 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 		Version:    version,
 		Name:       up.Name,
 		UpFile:     up.Raw,
-		Checksum:   Checksum(upBody),
+		Checksum:   checksum(upBody),
 		Directives: directives,
 		up:         upText,
 	}
@@ -272,7 +277,7 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 			return m, problems
 		}
 
-		downText := Normalise(downBody)
+		downText := normalise(downBody)
 
 		if _, err := sqlsplit.Split(downText); err != nil {
 			problems = append(problems, &SourceError{
@@ -280,13 +285,13 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 			})
 		}
 
-		downDirectives, err := ParseDirectives(downText)
+		downDirectives, err := parseDirectives(downText)
 		if err != nil {
 			problems = append(problems, &SourceError{File: down.Raw, Err: err})
 		}
 
 		m.DownFile = down.Raw
-		m.DownChecksum = Checksum(downBody)
+		m.DownChecksum = checksum(downBody)
 		m.DownDirectives = downDirectives
 		m.down = downText
 	}
@@ -294,9 +299,13 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 	return m, problems
 }
 
-// Normalise rewrites a migration body into the canonical form the checksum is
+// normalise rewrites a migration body into the canonical form the checksum is
 // taken over: no BOM, LF line endings, no trailing whitespace on any line and
 // none at the end of the file.
+//
+// Unexported: the algorithm is part of the contract and is documented on
+// [Migration.Checksum], but a caller has no reason to run it. Checksums reach
+// the outside world as [Migration.Checksum] values, already computed.
 //
 // This exists because a Windows checkout with core.autocrlf=true otherwise
 // produces a checksum mismatch caused by nothing but line endings — and a
@@ -305,7 +314,7 @@ func readMigration(fsys fs.FS, version int64, up, down naming.File, hasDown bool
 //
 // The algorithm is part of the contract and cannot change without a new major
 // version: changing it invalidates every checksum recorded in every database.
-func Normalise(body []byte) string {
+func normalise(body []byte) string {
 	s := strings.TrimPrefix(string(body), "\ufeff")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -318,13 +327,13 @@ func Normalise(body []byte) string {
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }
 
-// Checksum reports the hex sha256 of a normalised migration body.
+// checksum reports the hex sha256 of a normalised migration body.
 //
 // It covers the file, not the SQL that is finally sent: pointing two
 // deployments at two schemas through placeholders must not look like somebody
 // having edited a released file.
-func Checksum(body []byte) string {
-	sum := sha256.Sum256([]byte(Normalise(body)))
+func checksum(body []byte) string {
+	sum := sha256.Sum256([]byte(normalise(body)))
 
 	return hex.EncodeToString(sum[:])
 }
@@ -344,13 +353,14 @@ type Directives struct {
 	// migration. Zero means inherit.
 	StatementTimeout time.Duration
 	LockTimeout      time.Duration
-	// Tags are free-form labels, reported by status and ignored by the runner.
+	// Tags are free-form labels. status shows them, in the table and in the
+	// JSON, and the runner ignores them.
 	Tags []string
 }
 
 const directivePrefix = "migrator:"
 
-// ParseDirectives reads the directives at the head of a migration body.
+// parseDirectives reads the directives at the head of a migration body.
 //
 // Only the lines before the first SQL token are considered: a directive found
 // on line 300 cannot retroactively change how the first 299 lines ran.
@@ -360,7 +370,7 @@ const directivePrefix = "migrator:"
 // fails with SQLSTATE 25001 if you are lucky and holds a lock across the whole
 // migration if you are not. Strictness is free here: the whole source is
 // validated before the first connection is opened.
-func ParseDirectives(body string) (Directives, error) {
+func parseDirectives(body string) (Directives, error) {
 	var (
 		d    Directives
 		errs []error

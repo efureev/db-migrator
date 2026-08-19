@@ -47,7 +47,15 @@ type Record struct {
 	ChecksumPrevious   string
 	// Migrator is the version of the tool that applied it.
 	Migrator string
+	// AdoptedAt is set when the row was written by adopt rather than by a run.
+	//
+	// "Applied" and "we were told it was applied" are different claims, and only
+	// one of them was observed here; status has to be able to say which.
+	AdoptedAt *time.Time
 }
+
+// Adopted reports a migration recorded without having been watched running.
+func (r Record) Adopted() bool { return r.AdoptedAt != nil }
 
 // InForce reports whether the migration is part of the current schema: it
 // finished and has not been rolled back.

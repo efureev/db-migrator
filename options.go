@@ -43,6 +43,7 @@ type config struct {
 	environment        Environment
 	wipeProtectPattern string
 	dryRun             bool
+	forceWipe          bool
 }
 
 func defaults() config {
@@ -273,6 +274,15 @@ func (e *Environment) UnmarshalText(b []byte) error {
 // the question without the flags that make the answer meaningful.
 func WithDryRun() Option {
 	return optionFunc(func(c *config) { c.dryRun = true })
+}
+
+// WithForceWipe lets a wipe proceed even when objects outside the schema depend
+// on it and CASCADE would take them too.
+//
+// Separate from [WithAllowWipe] on purpose: allowing a wipe is a statement about
+// this schema, and this is a statement about somebody else's.
+func WithForceWipe() Option {
+	return optionFunc(func(c *config) { c.forceWipe = true })
 }
 
 // WithWipeProtectPattern sets the regular expression that refuses a wipe by

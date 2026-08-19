@@ -66,9 +66,21 @@ whole repository hides exactly what matters: a fall in the domain compensated by
 a rise elsewhere stays green.
 
 Lowering a threshold is a deliberate edit, visible in the diff, with the reason
-in the commit message. Two of the numbers there are low on purpose and say why:
-`internal/cli` is mostly exercised through a subprocess, whose coverage Go does
-not collect.
+in the commit message.
+
+The numbers come from `go tool covdata`, and they include the subprocess: `e2e`
+builds the binary with `-cover` and hands it a `GOCOVERDIR`, so the commands
+that need a database are counted like everything else. Before that, the
+`internal/cli` threshold carried an apology instead of a number.
+
+## The `--json` format
+
+Every top-level JSON object carries `"format": <int>`, from `migrator.JSONFormat`.
+
+Adding a field does not change it. Removing one, renaming one, or changing what
+one means does — and that bump is a CHANGELOG entry of its own, because a
+consumer that cannot tell one shape from another breaks silently, which is the
+class of failure the rest of this tool exists to prevent.
 
 ## Commits and changelog
 

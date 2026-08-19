@@ -10,6 +10,17 @@ import (
 	"time"
 )
 
+// JSONFormat is the version of the shape every --json object carries.
+//
+// An integer, not a SemVer string: a consumer needs a comparison, not a parse.
+// Adding a field does not change it; removing one or changing what one means
+// does, and that change is a CHANGELOG entry of its own.
+//
+// Without it a consumer cannot tell 2.0's output from 2.3's and breaks
+// silently — which is the class of failure the rest of this tool exists to
+// prevent, so leaving it out of the tool's own output would be odd.
+const JSONFormat = 1
+
 // A Report is the outcome of a run.
 type Report struct {
 	// Direction says which way the run went. A Redo reports DirectionDown: it
@@ -23,7 +34,9 @@ type Report struct {
 	// Applied is one record per migration the run wrote, in the order it wrote
 	// them.
 	Applied []Record
-	// DryRun reports a run that decided what to do and did not do it.
+	// DryRun reports a run that decided what to do and did not do it. Only
+	// Adopt sets it: up --dry-run answers through Plan, which is a different
+	// type because it renders the SQL rather than the outcome.
 	DryRun bool
 	// OneTransaction reports whether the whole run held together. For Up and
 	// Down it is true when the run completed; for Redo it is true only when
@@ -81,6 +94,18 @@ func (r *Report) String() string {
 
 // Text writes the report as a human reads it.
 func (r *Report) Text(w io.Writer) error {
+	if len(r.Repairs) > 0 {
+		var b strings.Builder
+
+		for _, rep := range r.Repairs {
+			fmt.Fprintf(&b, "  %s\n", rep)
+		}
+
+		_, err := io.WriteString(w, b.String())
+
+		return err
+	}
+
 	if r.Empty() {
 		_, err := fmt.Fprintln(w, "Schema is up to date. Nothing to apply.")
 
@@ -97,6 +122,9 @@ func (r *Report) Text(w io.Writer) error {
 		state := "applied"
 
 		switch {
+		case rec.Adopted():
+			// Never "applied": nobody here watched it run.
+			state = "adopted"
 		case rec.RolledBackAt != nil:
 			state = "reverted"
 		case !rec.InForce():
@@ -107,7 +135,11 @@ func (r *Report) Text(w io.Writer) error {
 			state, rec.Version, rec.Name, rec.ExecutionTime.Round(time.Millisecond))
 	}
 
-	fmt.Fprintf(&b, "\n  Done. %s.", r)
+	if r.DryRun {
+		fmt.Fprintf(&b, "\n  Dry run: %d row(s) would be written, nothing was.", len(r.Applied))
+	} else {
+		fmt.Fprintf(&b, "\n  Done. %s.", r)
+	}
 
 	if current := r.Current(); current > 0 {
 		fmt.Fprintf(&b, " Current version %d.", current)
@@ -125,6 +157,13 @@ func (r *Report) Text(w io.Writer) error {
 // An empty run writes an empty array rather than null, so that the shape of the
 // output does not depend on the outcome.
 func (r *Report) JSON(w io.Writer) error {
+	type repair struct {
+		Version int64  `json:"version"`
+		Action  string `json:"action"`
+		Before  string `json:"before,omitempty"`
+		After   string `json:"after,omitempty"`
+	}
+
 	type record struct {
 		Version    int64  `json:"version"`
 		Name       string `json:"name"`
@@ -133,26 +172,39 @@ func (r *Report) JSON(w io.Writer) error {
 		DurationMS int64  `json:"duration_ms"`
 		RolledBack bool   `json:"rolled_back"`
 		Complete   bool   `json:"complete"`
+		Adopted    bool   `json:"adopted,omitempty"`
 	}
 
 	out := struct {
+		Format         int      `json:"format"`
 		Direction      string   `json:"direction"`
 		Target         string   `json:"target"`
 		StartedAt      string   `json:"started_at"`
 		DurationMS     int64    `json:"duration_ms"`
-		DryRun         bool     `json:"dry_run"`
 		OneTransaction bool     `json:"one_transaction"`
 		Current        int64    `json:"current_version"`
+		DryRun         bool     `json:"dry_run"`
 		Applied        []record `json:"applied"`
+		Repairs        []repair `json:"repairs"`
 	}{
+		Format:         JSONFormat,
 		Direction:      r.Direction.String(),
 		Target:         r.Target.String(),
 		StartedAt:      r.StartedAt.UTC().Format(time.RFC3339),
 		DurationMS:     r.Duration.Milliseconds(),
-		DryRun:         r.DryRun,
 		OneTransaction: r.OneTransaction,
 		Current:        r.Current(),
+		DryRun:         r.DryRun,
 		Applied:        make([]record, 0, len(r.Applied)),
+		Repairs:        make([]repair, 0, len(r.Repairs)),
+	}
+
+	for _, rep := range r.Repairs {
+		// A conversion, not a literal: the two shapes are identical today, and
+		// if RepairResult ever gains a field this stops compiling — which is
+		// the point. Adding a field to the wire format has to be a decision
+		// somebody makes, because it bumps JSONFormat.
+		out.Repairs = append(out.Repairs, repair(rep))
 	}
 
 	for _, rec := range r.Applied {
@@ -164,6 +216,7 @@ func (r *Report) JSON(w io.Writer) error {
 			DurationMS: rec.ExecutionTime.Milliseconds(),
 			RolledBack: rec.RolledBackAt != nil,
 			Complete:   rec.FinishedAt != nil,
+			Adopted:    rec.Adopted(),
 		})
 	}
 
@@ -181,7 +234,6 @@ func (r *Report) LogValue() slog.Value {
 		slog.Int("applied", len(r.Applied)),
 		slog.Duration("duration", r.Duration),
 		slog.Int64("current", r.Current()),
-		slog.Bool("dry_run", r.DryRun),
 	)
 }
 
@@ -209,7 +261,18 @@ func (s *Status) Text(w io.Writer) error {
 			}
 		}
 
-		fmt.Fprintf(&b, "  %-16d %-28s %-12s %-21s %s\n", e.Version, e.Name, e.State, at, took)
+		name := e.Name
+		if e.Migration != nil && len(e.Migration.Directives.Tags) > 0 {
+			name += " [" + strings.Join(e.Migration.Directives.Tags, ",") + "]"
+		}
+
+		if e.Record != nil && e.Record.Adopted() {
+			// Adopted and applied are different claims, and only one of them was
+			// observed here.
+			name += " (adopted)"
+		}
+
+		fmt.Fprintf(&b, "  %-16d %-28s %-12s %-21s %s\n", e.Version, name, e.State, at, took)
 
 		switch {
 		case e.State == StateApplied:
@@ -245,14 +308,17 @@ func (s *Status) Text(w io.Writer) error {
 // JSON writes the status in the shape a CI step parses.
 func (s *Status) JSON(w io.Writer) error {
 	type entry struct {
-		Version   int64  `json:"version"`
-		Name      string `json:"name"`
-		State     string `json:"state"`
-		AppliedAt string `json:"applied_at,omitempty"`
-		Checksum  string `json:"checksum,omitempty"`
+		Version   int64    `json:"version"`
+		Name      string   `json:"name"`
+		State     string   `json:"state"`
+		AppliedAt string   `json:"applied_at,omitempty"`
+		Checksum  string   `json:"checksum,omitempty"`
+		Tags      []string `json:"tags,omitempty"`
+		Adopted   bool     `json:"adopted,omitempty"`
 	}
 
 	out := struct {
+		Format      int     `json:"format"`
 		Schema      string  `json:"schema"`
 		Table       string  `json:"table"`
 		Initialised bool    `json:"initialised"`
@@ -260,6 +326,7 @@ func (s *Status) JSON(w io.Writer) error {
 		Pending     int     `json:"pending"`
 		Entries     []entry `json:"entries"`
 	}{
+		Format:      JSONFormat,
 		Schema:      s.Schema,
 		Table:       s.Table,
 		Initialised: s.Initialised,
@@ -271,9 +338,14 @@ func (s *Status) JSON(w io.Writer) error {
 	for _, e := range s.Entries {
 		item := entry{Version: e.Version, Name: e.Name, State: e.State.String()}
 
+		if e.Migration != nil {
+			item.Tags = e.Migration.Directives.Tags
+		}
+
 		if e.Record != nil {
 			item.AppliedAt = e.Record.AppliedAt.UTC().Format(time.RFC3339)
 			item.Checksum = e.Record.Checksum
+			item.Adopted = e.Record.Adopted()
 		}
 
 		out.Entries = append(out.Entries, item)

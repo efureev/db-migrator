@@ -70,13 +70,35 @@ func ExampleLoad_problems() {
 // The checksum covers the file in a canonical form, so that a Windows checkout
 // with core.autocrlf=true does not look like somebody having edited a released
 // migration — and a real edit still does.
-func ExampleChecksum() {
-	unix := []byte("CREATE TABLE users (id int);\n")
-	windows := []byte("CREATE TABLE users (id int);\r\n")
-	edited := []byte("CREATE TABLE users (id bigint);\n")
+//
+// Checksums reach the outside world through [Migration.Checksum]; the hashing
+// and the normalisation are the package's own business.
+func ExampleLoad_checksums() {
+	same := func(a, b string) bool {
+		load := func(body string) string {
+			set, err := migrator.Load(fstest.MapFS{
+				"1_create_users.up.sql": &fstest.MapFile{Data: []byte(body)},
+			})
+			if err != nil {
+				panic(err)
+			}
 
-	fmt.Println(migrator.Checksum(unix) == migrator.Checksum(windows))
-	fmt.Println(migrator.Checksum(unix) == migrator.Checksum(edited))
+			m, _ := set.ByVersion(1)
+
+			return m.Checksum
+		}
+
+		return load(a) == load(b)
+	}
+
+	const (
+		unix    = "CREATE TABLE users (id int);\n"
+		windows = "CREATE TABLE users (id int);\r\n"
+		edited  = "CREATE TABLE users (id bigint);\n"
+	)
+
+	fmt.Println(same(unix, windows))
+	fmt.Println(same(unix, edited))
 
 	// Output:
 	// true

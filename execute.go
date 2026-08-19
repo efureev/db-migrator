@@ -314,7 +314,7 @@ func (m *Migrator) confirm(
 
 	rec, err := scanRecord(s.QueryRow(ctx, fmt.Sprintf(
 		`UPDATE %s SET %s WHERE version = $1 RETURNING %s`,
-		m.qualified(), set, recordColumns),
+		m.qualified(), set, recordColumns()),
 		mig.Version, took.Milliseconds()))
 	if err != nil {
 		return Record{}, fmt.Errorf("%w: confirm %s: %w", ErrBookkeeping, mig, redact(err))
@@ -333,7 +333,7 @@ func (m *Migrator) record(
 		// "applied, then rolled back" instead of "never applied".
 		rec, err := scanRecord(tx.QueryRow(ctx, fmt.Sprintf(
 			`UPDATE %s SET rolled_back_at = now(), execution_ms = $2
-			  WHERE version = $1 RETURNING %s`, m.qualified(), recordColumns),
+			  WHERE version = $1 RETURNING %s`, m.qualified(), recordColumns()),
 			mig.Version, took.Milliseconds()))
 		if err != nil {
 			return Record{}, fmt.Errorf("%w: record rollback of %s: %w", ErrBookkeeping, mig, redact(err))
@@ -354,7 +354,7 @@ func (m *Migrator) record(
 		       transactional = EXCLUDED.transactional, rolled_back_at = NULL
 		 WHERE %s.rolled_back_at IS NOT NULL OR %s.finished_at IS NULL
 		RETURNING %s`,
-		m.qualified(), m.qualified(), m.qualified(), recordColumns),
+		m.qualified(), m.qualified(), m.qualified(), recordColumns()),
 		mig.Version, mig.Name, mig.Checksum, nullable(mig.DownChecksum),
 		took.Milliseconds(), m.cfg.appliedBy, transactional, m.cfg.migratorTag))
 	if err != nil {

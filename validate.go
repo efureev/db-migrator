@@ -191,9 +191,10 @@ func (r *ValidationReport) Text(w io.Writer) error {
 // JSON writes the report in the shape a CI step parses.
 func (r *ValidationReport) JSON(w io.Writer) error {
 	out := struct {
+		Format   int       `json:"format"`
 		OK       bool      `json:"ok"`
 		Problems []Problem `json:"problems"`
-	}{OK: r.OK(), Problems: r.problems}
+	}{Format: JSONFormat, OK: r.OK(), Problems: r.problems}
 
 	if out.Problems == nil {
 		out.Problems = []Problem{}
@@ -321,15 +322,19 @@ func (m *Migrator) Validate(ctx context.Context) (*ValidationReport, error) {
 	return report, nil
 }
 
-// ValidateSource checks everything that can be checked without a database.
+// Validate checks everything that can be checked without a database.
 //
 // It exists so that `migrator validate --offline` works in a pre-commit hook
 // and in a CI job that has no PostgreSQL, where the useful question is "are
 // these files well formed", not "does this database match them".
-func ValidateSource(set *Set, strict bool) *ValidationReport {
+//
+// A method on Set rather than a free function taking one: everything it looks
+// at is the set, and a package-level ValidateSource(set, …) reads like there is
+// some other kind of source it might have taken.
+func (s *Set) Validate(strict bool) *ValidationReport {
 	report := &ValidationReport{}
 
-	for mig := range set.All() {
+	for mig := range s.All() {
 		if !mig.HasDown() {
 			severity := SeverityWarning
 			if strict {

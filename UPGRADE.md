@@ -76,31 +76,47 @@ quietly at run time:
 ## Adopting a database that 1.x migrated
 
 `golang-migrate` recorded one row: `version` and `dirty`. Version 2 records a row
-per migration, with a checksum, so the two are not compatible and no conversion
-is possible without deciding what the checksums should be.
-
-For a database whose schema is known to match the files:
+per migration, with a checksum, so the two journals are not compatible. Handing a
+database over is one command:
 
 ```bash
-# 1. Check what 1.x thinks is applied.
-psql -c 'SELECT * FROM schema_migrations'
-
-# 2. Move the old table out of the way rather than dropping it.
-psql -c 'ALTER TABLE schema_migrations RENAME TO schema_migrations_v1'
-
-# 3. Let version 2 create its own journal and record every migration up to the
-#    version 1.x reported, without running any of them.
-migrator repair --baseline <version>   # planned for 2.1; until then, see below
+migrator adopt --from-golang-migrate --confirm <database>
 ```
 
-Until `repair --baseline` ships, the manual equivalent is to run
-`migrator up` against a **copy** of the database, take the resulting
-`schema_migrations` rows, and insert them into the real one. The checksums must
-be the ones this version of the files produces; `migrator status` on the copy
-shows them.
+It reads the version out of the old journal, records every migration up to and
+including it as applied — **running none of them** — and moves the old table
+aside as `schema_migrations_pre_v2` rather than dropping it, so a rollback to the
+old tool stays possible.
 
-A database that has not been migrated yet needs none of this: point version 2 at
-it and run `migrator up`.
+Run it with `--dry-run` first: that prints exactly which versions would be
+recorded and writes nothing.
+
+If the old journal is marked `dirty`, adoption refuses. That flag means a
+migration failed partway and nobody recorded what state it left the schema in;
+adopting would freeze an unknown state as the truth. Resolve it with the old
+tool first.
+
+For a database whose schema was built by hand or by something else entirely,
+name the version yourself:
+
+```bash
+migrator adopt --baseline 20240517101122 --confirm <database>
+```
+
+### What adoption is, and what it is not
+
+Adoption takes your word that the schema matches the files. That word is the
+whole risk, so the rows are marked: `migrator status` shows them as `(adopted)`
+forever, and `--json` carries `"adopted": true`.
+
+**Check the schema before adopting.** A database that does not match the files is
+not made to match by adopting it — it is made to look as though it does, which is
+worse. The cheapest check is to run `migrator up` against a *copy* restored from
+a dump, see that it produces the schema you expect, and only then adopt the real
+one.
+
+Adoption runs no migration SQL and touches no schema object other than renaming
+that one table.
 
 ## What to expect the first time
 

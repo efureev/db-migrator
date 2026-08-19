@@ -13,6 +13,10 @@ import (
 //
 // It is satisfied by *pgx.Conn, *pgxpool.Conn and pgx.Tx alike, which is
 // exactly why it is not the abstraction the constructor takes — see [Session].
+//
+// It stays exported for one reason: [Session] embeds it, so unexporting it
+// would make [Connector] impossible to implement outside this package — and
+// wrapping a connection for tracing or metrics is a legitimate thing to want.
 type Conn interface {
 	// Exec runs a statement that returns no rows.
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
