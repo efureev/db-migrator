@@ -1,0 +1,10 @@
+.git
+.github
+build
+dist
+coverage.out
+e2e
+docs
+*.md
+.claude
+.idea

@@ -1,68 +1,60 @@
 #!/usr/bin/env bash
-
-set -euxo pipefail
-
-TARGET=${1:-${TARGET:-'local'}};
-APP_NAME=${APP_NAME:-'migrate'};
-BUILD_FOR_DOCKER=${BUILD_FOR_DOCKER:-'0'};
-allow=("local" "gh")
-targetFound=0
-
-for i in "${allow[@]}"
-do
-  if [[ $i == "$TARGET" ]]
-  then
-    targetFound=1
-  fi
-done
-
-if [ "$targetFound" == 0 ]; then
-  echo "Not found a Target"
-  exit;
-fi
-
-echo "Building for $TARGET..."
-
-####
-
-VERSION_TAG=${VERSION_TAG:-"-"}
-VERSION_BUILD="-"
-BUILD_TIME_LOCAL=$(date -u '+%Y-%m-%d_%H:%M:%S')
-BUILD_TIME=${BUILD_TIME:-$BUILD_TIME_LOCAL}
-
 #
-if [[ "$TARGET" == 'local' ]]; then
+# Builds the migrator binary.
+#
+# Two defects in the version-1 script are fixed here by name, because both
+# survived eight releases without anybody noticing:
+#
+#   1. The -X flags named "migrator/src/commands.version" while the module was
+#      "github.com/efureev/db-migrator". The linker ignores an unknown symbol
+#      silently, so every released binary printed "unknown (unknown)". The path
+#      below is the real one, and internal/buildinfo/ldflags_test.go reads this
+#      file and checks it against the package's actual import path.
+#
+#   2. The architecture suffix was the constant "x64" whatever GOARCH said, and
+#      darwin/arm64 was never built at all — on the machine the tool was written
+#      on, the release shipped a binary that could not run.
 
-  VERSION_TAG=$(git describe --abbrev=0 --tags)
-  VERSION_BUILD=$(git log --pretty="%h" -n1 HEAD)
+set -euo pipefail
 
-elif [[ "$TARGET" == 'gh' ]]; then
+APP_NAME=${APP_NAME:-migrator}
+BUILD_DIR=${BUILD_DIR:-build}
+LDFLAGS_PKG=${LDFLAGS_PKG:-github.com/efureev/db-migrator/v2/internal/buildinfo}
 
-  if [ "$BUILDPLATFORM" != "$TARGETPLATFORM" ]; then
-      echo "Cross-compiling to $TARGETPLATFORM"
-      # $TARGETPLATFORM is something like:
-      #   linux/amd64
-      #   linux/arm64
-      #   linux/arm/v8
-      target_platform=(${TARGETPLATFORM//\// })
-      export GOOS=${target_platform[0]}
-      export GOARCH=${target_platform[1]}
-      if [ "${#target_platform[@]}" -gt 2 ]; then
-          export GOARM=${target_platform[2]//v}
-      fi
-  else
-      echo "Compiling to $TARGETPLATFORM"
-  fi
+VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
+COMMIT=${COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo none)}
+DATE=${DATE:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}
+
+ldflags="-s -w \
+  -X ${LDFLAGS_PKG}.version=${VERSION} \
+  -X ${LDFLAGS_PKG}.commit=${COMMIT} \
+  -X ${LDFLAGS_PKG}.date=${DATE}"
+
+build_one() {
+  local goos=$1 goarch=$2
+  local out="${BUILD_DIR}/${APP_NAME}_${goos}_${goarch}"
+
+  [ "$goos" = windows ] && out="${out}.exe"
+
+  echo "  ${goos}/${goarch} -> ${out}"
+
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+    go build -trimpath -ldflags "$ldflags" -o "$out" ./cmd/migrator
+}
+
+mkdir -p "$BUILD_DIR"
+
+echo "migrator ${VERSION} (${COMMIT})"
+
+if [ "${BUILD_ALL:-0}" = "1" ]; then
+  # darwin/arm64 first, deliberately: it is the platform this is written on and
+  # the one v1 never shipped.
+  for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+    build_one "${target%/*}" "${target#*/}"
+  done
+
+  ( cd "$BUILD_DIR" && shasum -a 256 -- * > SHA256SUMS 2>/dev/null || sha256sum -- * > SHA256SUMS )
+  echo "  checksums -> ${BUILD_DIR}/SHA256SUMS"
+else
+  build_one "$(go env GOOS)" "$(go env GOARCH)"
 fi
-
-BUILDING_FLAGS="\
-     -X 'migrator/src/commands.version=$VERSION_TAG' \
-     -X 'migrator/src/commands.build=$VERSION_BUILD' \
-     -X 'migrator/src/commands.buildTime=$BUILD_TIME' \
-"
-
-if [ "$BUILD_FOR_DOCKER" == '1' ]; then
-  BUILDING_FLAGS="$BUILDING_FLAGS -s -w"
-fi
-
-CGO_ENABLED=0 go build -ldflags="$BUILDING_FLAGS" -o "$APP_NAME"

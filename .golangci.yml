@@ -1,0 +1,133 @@
+# Линтер обязан быть зелёным. В v1 на дефолтном наборе висело пять замечаний
+# errcheck, и их пришлось документировать как «фон, а не регрессия» — то есть
+# сравнивать приходилось с пятёркой вместо нуля. Здесь находка означает либо
+# дефект, либо повод обсудить правило явно, но никогда — шум, с которым живут.
+version: "2"
+
+run:
+  modules-download-mode: readonly
+  build-tags:
+    - integration
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - errorlint      # ошибки, сравненные через == вместо errors.Is
+    - forbidigo      # fmt.Print* вне слоя вывода: иначе --json протекает
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - perfsprint
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - wastedassign
+
+  settings:
+    depguard:
+      # Главное правило проекта: библиотеку импортируют в чужие приложения,
+      # и каждая её транзитивная зависимость становится зависимостью чужого
+      # продакшн-бинарника. Обещание такого рода живёт полтора месяца, если
+      # его не проверять машиной, — поэтому оно здесь, а не в CONTRIBUTING.
+      rules:
+        library:
+          list-mode: lax
+          files:
+            - '!**/internal/cli/**'
+            - '!**/internal/config/**'
+            - '!**/internal/ui/**'
+            - '!**/cmd/**'
+            - '!**/e2e/**'
+          deny:
+            - pkg: github.com/efureev/reggol
+              desc: >-
+                логгер — выбор приложения, а не библиотеки; в библиотеке
+                принимается *slog.Logger, а reggol живёт только в internal/ui
+            - pkg: github.com/efureev/envi
+              desc: >-
+                разбор .env — работа CLI; библиотека получает готовые значения
+                через опции
+            - pkg: github.com/spf13
+              desc: v1 тащила viper со всем деревом; в v2 конфигурация — это stdlib flag и envi
+        pgxpool:
+          list-mode: lax
+          files:
+            - '!**/connector*.go'
+            # A test that exercises the pool path has to be able to build one,
+            # and so does the example that shows a caller doing it. The rule
+            # protects the library's own code from routing statements across
+            # backends; it is not a ban on the word.
+            - '!**/*_test.go'
+            - '!**/examples/**'
+          deny:
+            - pkg: github.com/jackc/pgx/v5/pgxpool
+              desc: >-
+                прогон обязан идти по одной закреплённой сессии: session-level
+                advisory-lock и SET не переживают маршрутизацию пула. Пул
+                разворачивается в сессию ровно в FromPool
+
+    errcheck:
+      exclude-functions:
+        # Rendering to a terminal. Checking every Fprintf at its call site is
+        # noise, and a failed write to stderr has nowhere to be reported. The
+        # answer stream is checked once, at the end: ui.recordingWriter keeps
+        # the first error and cli.run turns it into a non-zero exit, so a
+        # closed pipe cannot look like a clean run.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Освобождение лока и откат идут в defer по неотменяемому контексту:
+        # к этому моменту сообщать об ошибке уже некому, а сломанное соединение
+        # само по себе означает, что бэкенд ушёл и лок отпущен.
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Print.*$
+          msg: вывод идёт через internal/ui, иначе он не подчиняется --json и --quiet
+
+    revive:
+      rules:
+        # Каждый экспортированный символ несёт doc-комментарий: страница godoc —
+        # первое, что читает тот, кто выбирает библиотеку.
+        - name: exported
+          arguments: [checkPublicInterface]
+        - name: package-comments
+
+    gocritic:
+      enabled-tags: [performance, diagnostic, style]
+      disabled-checks:
+        - whyNoLint
+        # Migration и Record — значимые типы публичного API: их возвращают,
+        # кладут в срезы и сравнивают. Обе проверки требуют перевести их на
+        # указатели ради копирования двухсот байт заголовков строк (тела
+        # миграций за ними не копируются) в цикле по десяткам элементов, за
+        # которым идёт сетевой вызов к PostgreSQL. Выигрыш неизмерим, а цена
+        # реальна: с указательным получателем Migration{}.HasDown() перестаёт
+        # компилироваться, и значение типа больше не является значением.
+        # Правило отключено осознанно, а не потому, что мешало.
+        - rangeValCopy
+        - hugeParam
+
+  exclusions:
+    generated: lax
+    rules:
+      # Тестовые хелперы вправе игнорировать ошибки, которых не вправе
+      # игнорировать продакшн-код.
+      - path: _test\.go$
+        linters: [errcheck, gosec, forbidigo]
+      # CLI и его тесты — единственное место, где печать в stdout и есть работа.
+      - path: (internal/ui|internal/cli|cmd)/
+        linters: [forbidigo]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

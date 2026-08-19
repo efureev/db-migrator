@@ -1,0 +1,108 @@
+# В v1 единственный workflow висел на `on: release: published` и только публиковал
+# артефакты: ни тестов, ни линтера, ни сборки на push или PR. Регрессия
+# обнаруживалась после публикации релиза. Здесь всё наоборот — этот файл гоняется
+# на каждый push и каждый PR, а релизный живёт отдельно в build.yml.
+name: Test
+
+on:
+  push:
+    branches: [master, v2]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Держать в одной версии с Makefile: соседний патч линтера анализирует иначе.
+  GOLANGCI_VERSION: v2.12.2
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          # Версия тулчейна берётся из go.mod и нигде не дублируется числом.
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_VERSION }}
+
+  tidy:
+    name: go mod tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: go.mod }
+      - run: go mod tidy
+      - name: go.mod и go.sum не должны меняться
+        run: git diff --exit-code go.mod go.sum
+
+  unit:
+    name: Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: go.mod }
+      - run: go build ./...
+      - run: go test -race -shuffle=on ./...
+
+  integration:
+    name: Integration (PostgreSQL ${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 14 — самая старая из поддерживаемых сообществом на момент написания,
+        # 18 — самая новая. Между ними меняется поведение, на которое опирается
+        # runner: права схемы public поменялись в 15, а DROP DATABASE ... WITH
+        # (FORCE) появился в 13.
+        postgres: ['14', '17', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: migrator
+          POSTGRES_PASSWORD: migrator
+          POSTGRES_DB: migrator_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U migrator"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: go.mod }
+      - name: Интеграционные тесты
+        env:
+          # testdb.DSN делает t.Fatal, а не t.Skip, когда CI=1 и DSN пуст:
+          # молча пропущенный интеграционный уровень — худший исход, потому что
+          # выглядит он как зелёный прогон.
+          MIGRATOR_TEST_DSN: postgres://migrator:migrator@127.0.0.1:5432/migrator_test?sslmode=disable
+        run: go test -tags integration -race -shuffle=on ./...
+      - name: Артефакты упавших тестов
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-pg${{ matrix.postgres }}
+          path: ${{ runner.temp }}/**/artifacts/**
+          if-no-files-found: ignore
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version-file: go.mod }
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

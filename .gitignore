@@ -1,8 +1,21 @@
-/migrations
-config.toml
-config.test.toml
-.DS_Store
-.coverage
+# сборка
+/build/
+/dist/
+migrator
+
+# покрытие
+coverage.out
+coverage.txt
+/.coverage/
+
+# локальное окружение
+.env
+!.env.example
+
+# редакторы и ОС
 .idea/
-migrate
-config.yaml
+.vscode/
+.DS_Store
+
+# Claude Code: локальные разрешения, машинозависимые
+.claude/settings.local.json

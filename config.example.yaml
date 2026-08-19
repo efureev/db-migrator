@@ -1,9 +1,0 @@
-migrations:
-  path: "./migrations"
-
-database:
-  user: "fureev"
-  pass: ""
-  host: "localhost"
-  port: 5432
-  name: "testing"

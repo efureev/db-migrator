@@ -1,88 +1,91 @@
-APP ?= "migrator"
-PKG ?= "github.com/efureev/db-migrator"
+# Сборка, проверки и локальное окружение db-migrator v2.
+#
+# .PHONY объявлен и заполнен намеренно. В v1 эта строка была закомментирована,
+# и цель, чьё имя совпадало с каталогом, молча переставала работать.
 
-DC_RUN_ARGS = --rm --user "$(shell id -u):$(shell id -g)"
+APP           ?= migrator
+PKG           ?= github.com/efureev/db-migrator/v2
+BUILD_DIR     ?= build
 
-TEST_FLAGS ?=
-BUILD_PATH ?= build
-COVERAGE_DIR ?= .coverage
+# Версия линтера пиньится: соседний патч анализирует иначе, и «зелёно у меня»
+# перестаёт значить «зелёно в CI». В v1 версия бралась из сервиса docker-compose.
+#
+# Линтер намеренно НЕ добавлен в go.mod через tool-директиву: маленькое дерево
+# зависимостей — часть того, что эта библиотека обещает, и `go mod graph`
+# у потребителя не должен содержать линтер.
+GOLANGCI_VERSION ?= 2.12.2
 
-VERSION_BUILD=$(shell git log --pretty="%h" -n1 HEAD)
-VERSION_TAG=$(shell git describe --abbrev=0 --tags)
-BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%S')
+# Держать в одной паре с docker-compose.yml. Порт нестандартный намеренно:
+# локальный PostgreSQL на 5432 не должен оказаться той базой, по которой
+# прогоняются деструктивные тесты. См. комментарий в docker-compose.yml о том,
+# почему это не 55432.
+PGPORT        ?= 55439
+MIGRATOR_TEST_DSN ?= postgres://migrator:migrator@127.0.0.1:$(PGPORT)/migrator_test?sslmode=disable
 
-PKG_LIST := $(shell go list ${PKG}/... | grep -v /vendor/)
-GO_FILES := $(shell find . -name '*.go' | grep -v /vendor/ | grep -v _test.go)
-
-#VERSION_COMMIT :=  $(git log --pretty="%h" -n1 HEAD)
-#VERSION_DEFAULT := $(git tag --sort=-v:refname --list "v[0-9]*" | head -n 1)
-
-#.PHONY: all dep d-build build test coverage coverhtml lint
+.PHONY: help all fmt vet lint check test test-race test-integration test-all \
+        coverage db-up db-down db-logs build build-all docker docker-shell clean tidy
 
 all: help
 
-fmt: ## Run source code formatter tools
-	docker-compose run $(DC_RUN_ARGS) --no-deps go gofmt -s -w -d .
-	docker-compose run $(DC_RUN_ARGS) --no-deps go go mod tidy
+help: ## Показать этот список
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-lint: ## Run go linters
-	docker-compose run --rm --no-deps golint golangci-lint run
+fmt: ## Отформатировать исходники
+	gofmt -s -w .
 
-gotest: ## Run go tests
-	docker-compose run $(DC_RUN_ARGS) --no-deps go go test -v -race -timeout 5s ./...
+vet: ## go vet
+	go vet ./...
 
-test: lint gotest ## Run go tests and linters
+lint: ## Линтер (версия сверяется с пиненой)
+	@have=$$(golangci-lint version --short 2>/dev/null || echo none); \
+	if [ "$$have" != "$(GOLANGCI_VERSION)" ]; then \
+	  echo "нужен golangci-lint $(GOLANGCI_VERSION), найден: $$have"; \
+	  echo "поставить: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_VERSION)"; \
+	  exit 1; \
+	fi
+	golangci-lint run ./...
 
-test-short:
-	make test-with-flags --ignore-errors TEST_FLAGS='-short'
+tidy: ## go mod tidy и проверка, что он ничего не изменил
+	go mod tidy
+	@git diff --exit-code go.mod go.sum || (echo "go mod tidy изменил файлы — закоммить их" && exit 1)
 
-test2:
-	@-rm -r $(COVERAGE_DIR)
-	@mkdir $(COVERAGE_DIR)
-	make test-with-flags TEST_FLAGS='-v -race -covermode atomic -coverprofile $(COVERAGE_DIR)/combined.txt -bench=. -benchmem -timeout 20m'
+test: ## Юнит-тесты
+	go test ./...
 
-test-with-flags:
-	@go test $(TEST_FLAGS) ./...
+test-race: ## Юнит-тесты под детектором гонок
+	go test -race ./...
 
-#race: dep ## Run data race detector
-#	@go test -race -short ${PKG_LIST}
-#
-#msan: dep ## Run memory sanitizer
-#	@go test -msan -short ${PKG_LIST}
-#
-#html-coverage:
-#	go tool cover -html=$(COVERAGE_DIR)/combined.txt
+check: fmt vet lint test-race ## Полный гейт перед коммитом
 
-clean:
-	-rm -r "./${BUILD_PATH}"
+test-integration: ## Интеграционные тесты (нужна живая PostgreSQL, см. db-up)
+	MIGRATOR_TEST_DSN="$(MIGRATOR_TEST_DSN)" go test -tags integration -race ./...
 
-build: ## Build the binary file
-	APP_NAME=migrator ./build.sh
+test-all: test-race test-integration ## Все уровни
 
-build-docker:
-	BUILD_FOR_DOCKER=1 ./build.sh
+coverage: ## Покрытие с порогами по пакетам
+	MIGRATOR_TEST_DSN="$(MIGRATOR_TEST_DSN)" ./coverage.sh
 
-build-docker-image:
-	docker build \
-		--build-arg TARGET="local" \
-		--build-arg VERSION_TAG="${VERSION_TAG}" \
-		--build-arg APP_NAME="migrate" \
-		--tag efureev/db-migrator:latest \
-		--progress plain \
-		-f ./.ci/Dockerfile \
-		.
+db-up: ## Поднять PostgreSQL для тестов
+	docker compose up -d --wait postgres
 
-# example: make release V=0.0.0
-release:
-	git tag v$(V)
-	@read -p "Press enter to confirm and push to origin ..." && git push origin v$(V)
+db-down: ## Остановить и удалить PostgreSQL
+	docker compose down -v
 
+db-logs: ## Логи тестовой PostgreSQL
+	docker compose logs -f postgres
 
-#run: container
-#    (docker stop "${APP}:${VERSION_TAG}" || true) && (docker rm "${APP}:${VERSION_TAG}" || true)
-#    docker exec --name "${APP}" --rm \
-#    	"${APP}:${VERSION_TAG}"
+build: ## Собрать бинарник под текущую платформу
+	./build.sh
 
-help: ## Display this help screen
-	@grep -h -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+build-all: ## Собрать все релизные платформы
+	BUILD_ALL=1 ./build.sh
 
+docker: ## Собрать docker-образ (distroless)
+	docker build --target distroless -t $(APP):dev .
+
+docker-shell: ## Собрать вариант с шеллом
+	docker build --target shell -t $(APP):dev-alpine .
+
+clean: ## Удалить артефакты сборки
+	rm -rf $(BUILD_DIR) coverage.out
