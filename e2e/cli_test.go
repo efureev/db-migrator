@@ -191,6 +191,34 @@ func TestExitCodeTable(t *testing.T) {
 		}
 	})
 
+	t.Run("2 on a progress interval that is not one", func(t *testing.T) {
+		t.Parallel()
+
+		dsn := testdb.Fresh(t)
+		dir := project(t, twoTables)
+
+		// Two rejections down two different paths: a duration that does not
+		// parse is stopped by the parser, one that parses to a negative by
+		// Validate. One has been broken without the other before.
+		for _, bad := range []string{"often", "-5s"} {
+			got := runMigrator(t, dir, dsn, "up", "--progress-interval", bad)
+			if got.code != exitUsage {
+				t.Errorf("--progress-interval %s exited %d, want %d; stderr: %s",
+					bad, got.code, exitUsage, got.stderr)
+			}
+
+			if !strings.Contains(got.stderr, "progress-interval") {
+				t.Errorf("the refusal does not name the setting: %s", got.stderr)
+			}
+		}
+
+		// And nothing ran: a usage error has to be decided before the database
+		// is touched, or exit 2 stops meaning "retrying will not help".
+		if code := runMigrator(t, dir, dsn, "status", "--check").code; code != exitPending {
+			t.Errorf("status --check exited %d, want %d", code, exitPending)
+		}
+	})
+
 	t.Run("1 when a migration fails", func(t *testing.T) {
 		t.Parallel()
 
@@ -553,5 +581,110 @@ func edit(t *testing.T, dir, name, body string) {
 
 	if err := os.WriteFile(filepath.Join(dir, "migrations", name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestConfigShowsTheProgressInterval: a setting nobody can see the value of is
+// a setting nobody can debug. `migrator config` needs no database, which is
+// what makes this cheap.
+func TestConfigShowsTheProgressInterval(t *testing.T) {
+	t.Parallel()
+
+	dir := project(t, twoTables)
+
+	got := runMigrator(t, dir, "", "config")
+	if got.code != exitOK {
+		t.Fatalf("config exited %d: %s", got.code, got.stderr)
+	}
+
+	if !strings.Contains(got.stdout, "progress-interval") || !strings.Contains(got.stdout, "30s") {
+		t.Errorf("the default is not shown:\n%s", got.stdout)
+	}
+
+	got = runMigrator(t, dir, "", "config", "--progress-interval", "5s")
+	if !strings.Contains(got.stdout, "flag --progress-interval") {
+		t.Errorf("the provenance of the typed flag is not shown:\n%s", got.stdout)
+	}
+}
+
+// TestProgressGoesToStderrAndNeverBreaksJSON is the line that earns its place
+// most.
+//
+// Commentary on stdout would break every consumer that pipes the answer into
+// jq, and commentary that is not itself JSON would break every consumer that
+// parses stderr — which is exactly why ui.New switches the commentary encoder
+// under --json. A progress line arriving every 300ms is the first thing that
+// would find either hole.
+func TestProgressGoesToStderrAndNeverBreaksJSON(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	dir := project(t, map[string]string{"1_slow.up.sql": "SELECT pg_sleep(2);"})
+
+	got := runMigrator(t, dir, dsn, "up", "--json", "--progress-interval", "300ms")
+	if got.code != exitOK {
+		t.Fatalf("up exited %d: %s", got.code, got.stderr)
+	}
+
+	var report map[string]any
+	if err := json.Unmarshal([]byte(got.stdout), &report); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, got.stdout)
+	}
+
+	if strings.TrimSpace(got.stdout)[0] != '{' {
+		t.Errorf("stdout does not begin with JSON: %q", got.stdout)
+	}
+
+	var progress int
+
+	for _, line := range strings.Split(strings.TrimSpace(got.stderr), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("a commentary line is not JSON: %v\n%s", err, line)
+		}
+
+		if _, ok := entry["elapsed"]; ok {
+			progress++
+		}
+	}
+
+	// Two seconds against a 300ms interval. Not how many lines — that would be
+	// a test of a ticker on a shared runner — only that the channel carried
+	// something.
+	if progress == 0 {
+		t.Errorf("a two-second migration reported nothing on stderr:\n%s", got.stderr)
+	}
+}
+
+// TestQuietSilencesProgressAndNotFailures: --quiet is a request for less noise,
+// never for a program that fails without saying so.
+func TestQuietSilencesProgressAndNotFailures(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	dir := project(t, map[string]string{"1_slow.up.sql": "SELECT pg_sleep(2);"})
+
+	got := runMigrator(t, dir, dsn, "up", "--quiet", "--progress-interval", "300ms")
+	if got.code != exitOK {
+		t.Fatalf("up exited %d: %s", got.code, got.stderr)
+	}
+
+	if strings.Contains(got.stderr, "in progress") || strings.Contains(got.stderr, "still running") {
+		t.Errorf("--quiet still reported progress:\n%s", got.stderr)
+	}
+
+	bad := project(t, map[string]string{"1_bad.up.sql": "SELECT nonexistent_function();"})
+
+	failed := runMigrator(t, bad, testdb.Fresh(t), "up", "--quiet", "--progress-interval", "300ms")
+	if failed.code != exitFailure {
+		t.Errorf("a failing migration under --quiet exited %d, want %d", failed.code, exitFailure)
+	}
+
+	if strings.TrimSpace(failed.stderr) == "" {
+		t.Error("a failing migration under --quiet said nothing at all")
 	}
 }

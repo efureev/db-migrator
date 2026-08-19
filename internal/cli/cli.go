@@ -315,6 +315,7 @@ func (e *env) open(extra ...migrator.Option) (*migrator.Migrator, error) {
 		migrator.WithAdvisoryLockTimeout(e.cfg.AdvisoryLockTimeout),
 		migrator.WithLockTimeout(e.cfg.LockTimeout),
 		migrator.WithStatementTimeout(e.cfg.StatementTimeout),
+		migrator.WithProgressInterval(e.cfg.ProgressInterval),
 		migrator.WithEnvironment(e.environment()),
 		migrator.WithMigratorTag(buildinfo.Version()),
 	}

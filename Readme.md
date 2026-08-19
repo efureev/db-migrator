@@ -54,6 +54,27 @@ rules, inheritance, or the queue in front of the lock. Its rule table is checked
 against a real server, which is a different thing from being checked against
 itself.
 
+**A long migration says what it is doing while it does it.** Every 30 seconds a
+second connection reads PostgreSQL's own progress views for the backend running
+the migration and writes one line:
+
+```
+migrator: migration in progress  version=20260901130000 source=create_index
+          phase=building index  relation=users  percent=30
+          progress=12 400 000 of 41 200 000 blocks
+```
+
+A table rewrite, a backfill and a wait on a lock appear in no progress view, so
+for those the line reports `pg_stat_activity` instead — the state, the wait
+event, and how long the statement has been running. An hour-long
+`CREATE INDEX CONCURRENTLY` that says nothing is an hour in which nobody knows
+whether it is alive.
+
+Commentary goes to stderr, so it never touches a piped `--json` answer, and
+`--progress-interval 0` turns it off. It needs a second connection: `FromDSN`
+and `FromPool` can give one, `FromConn` cannot, and which it is gets detected
+rather than assumed.
+
 **Concurrent runs serialise on a PostgreSQL advisory lock**, taken before the
 bookkeeping table is created. The lock is session-level, so a process that dies
 releases it — there is no lock row to clean up by hand.
@@ -185,11 +206,17 @@ then `./.env` if it exists, then the built-in default.
 | `MIGRATOR_SCHEMA` | `--schema` | `public` |
 | `MIGRATOR_TABLE` | `--table` | `schema_migrations` |
 | `MIGRATOR_ENV` | `--env` | inferred |
+| `MIGRATOR_ENV_FILE` | `--env-file` | — |
+| `MIGRATOR_TIMEOUT` | `--timeout` | `0` |
 | `MIGRATOR_ADVISORY_LOCK_TIMEOUT` | `--advisory-lock-timeout` | `30s` |
 | `MIGRATOR_LOCK_TIMEOUT` | `--lock-timeout` | `3s` |
 | `MIGRATOR_STATEMENT_TIMEOUT` | `--statement-timeout` | `0` |
+| `MIGRATOR_PROGRESS_INTERVAL` | `--progress-interval` | `30s` |
+| `MIGRATOR_MAX_LOCK_LEVEL` | `--max-lock-level` | — |
+| `MIGRATOR_ALLOW_OUT_OF_ORDER` | `--allow-out-of-order` | `false` |
 | `MIGRATOR_LOG_LEVEL` | `--log-level` | `info` |
 | `MIGRATOR_JSON` | `--json` | `false` |
+| `MIGRATOR_NO_COLOR` | `--no-color` | `false` |
 
 `--allow-down`, `--allow-wipe` and `--confirm` have no environment variables on
 purpose. A variable is inherited by every process in a container and every step

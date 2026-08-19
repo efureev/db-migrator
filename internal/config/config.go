@@ -101,6 +101,8 @@ var Specs = []Spec{
 	// not: this is meant to be set once for a pipeline and left there.
 	{Flag: "max-lock-level", Key: "MIGRATOR_MAX_LOCK_LEVEL", Kind: KindString, Global: true,
 		Help: "refuse a migration taking a heavier lock, e.g. share-update-exclusive"},
+	{Flag: "progress-interval", Key: "MIGRATOR_PROGRESS_INTERVAL", Kind: KindDuration, Default: "30s", Global: true,
+		Help: "how often a running migration reports what it is doing; 0 turns it off"},
 }
 
 // A Config is one run's resolved configuration.
@@ -131,6 +133,8 @@ type Config struct {
 
 	AllowOutOfOrder bool   `env:"MIGRATOR_ALLOW_OUT_OF_ORDER,default=false"`
 	MaxLockLevel    string `env:"MIGRATOR_MAX_LOCK_LEVEL"`
+
+	ProgressInterval time.Duration `env:"MIGRATOR_PROGRESS_INTERVAL,default=30s"`
 
 	// origins records where each setting came from, keyed by flag name.
 	origins map[string]string
@@ -320,6 +324,8 @@ func assign(cfg *Config, spec Spec, raw string) error {
 		return assignBool(&cfg.AllowOutOfOrder, spec, raw)
 	case "max-lock-level":
 		cfg.MaxLockLevel = raw
+	case "progress-interval":
+		return assignDuration(&cfg.ProgressInterval, spec, raw)
 	default:
 		return fmt.Errorf("unknown setting %q", spec.Flag)
 	}
@@ -400,6 +406,7 @@ func (c *Config) Validate() error {
 	for name, d := range map[string]time.Duration{
 		"--timeout": c.Timeout, "--advisory-lock-timeout": c.AdvisoryLockTimeout,
 		"--lock-timeout": c.LockTimeout, "--statement-timeout": c.StatementTimeout,
+		"--progress-interval": c.ProgressInterval,
 	} {
 		if d < 0 {
 			errs = append(errs, fmt.Errorf("%s: %s is negative", name, d))

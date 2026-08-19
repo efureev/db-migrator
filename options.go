@@ -45,6 +45,8 @@ type config struct {
 	dryRun             bool
 	forceWipe          bool
 	maxLockLevel       LockLevel
+	progressConn       Connector
+	progressInterval   time.Duration
 }
 
 func defaults() config {
@@ -67,6 +69,7 @@ func defaults() config {
 		lockRetries:        3,
 		lockRetryBackoff:   time.Second,
 		wipeProtectPattern: `(?i)prod`,
+		progressInterval:   30 * time.Second,
 	}
 }
 
@@ -318,4 +321,50 @@ func WithWipeProtectPattern(pattern string) Option {
 // gets tired, not as a guarantee.
 func WithMaxLockLevel(l LockLevel) Option {
 	return optionFunc(func(c *config) { c.maxLockLevel = l })
+}
+
+// WithProgress polls the run's backend through c rather than through the
+// migrator's own connector.
+//
+// Reporting progress needs a second connection, because the first one is busy
+// running the migration. [FromDSN] and [FromPool] can give one and do so by
+// default; [FromConn] cannot — it hands back the connection its caller owns,
+// which is the one already in use.
+//
+// That is detected rather than assumed. Both connections are asked for
+// pg_backend_pid() before the first statement runs, while the run's session is
+// idle, and if the answer names one backend then progress is off for the run
+// and the reason is logged at debug level. A hand-written Connector that wraps
+// a single connection is therefore caught too, without this package having to
+// recognise it.
+//
+// A nil c is ignored, as with [WithLogger]. To turn progress off, say
+// WithProgressInterval(0).
+func WithProgress(c Connector) Option {
+	return optionFunc(func(cfg *config) {
+		if c != nil {
+			cfg.progressConn = c
+		}
+	})
+}
+
+// WithProgressInterval sets how often a running migration reports what it is
+// doing. The default is 30s; 0 turns reporting off, and anything below 100ms is
+// raised to 100ms.
+//
+// An hour-long CREATE INDEX CONCURRENTLY that says nothing is an hour in which
+// nobody knows whether it is alive. Every interval a second connection reads
+// PostgreSQL's own progress views for the backend running the migration and
+// writes one line: the phase, the table, how far along. When no progress view
+// has a row for it — which is the case for an ALTER TABLE that rewrites the
+// table, for a backfill UPDATE and for a wait on a lock alike — the line
+// reports pg_stat_activity instead: the state, the wait event, and how long the
+// statement has been running.
+//
+// Nothing is polled unless a logger was given. The default logger discards
+// everything, so there would be nowhere to write and no reason to open the
+// second connection; --quiet and --log-level error have the same effect, for
+// the same reason.
+func WithProgressInterval(d time.Duration) Option {
+	return optionFunc(func(c *config) { c.progressInterval = d })
 }

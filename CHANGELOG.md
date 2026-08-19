@@ -4,9 +4,47 @@ Keep a Changelog, SemVer.
 
 ## [2.1.0] — unreleased
 
-Migrations now say what they will lock before they run.
+Migrations now say what they will lock before they run, and say what they are
+doing while they run.
 
 ### Added
+
+- **A long migration reports its progress.** PostgreSQL publishes the progress
+  of its own long operations and almost nobody reads it. Every
+  `--progress-interval` — 30 seconds by default — a second connection reads
+  those views for the backend running the migration and writes one line:
+
+  ```
+  migrator: migration in progress  version=20260901130000 source=create_index
+            phase=building index  relation=users  percent=30
+            progress=12 400 000 of 41 200 000 blocks
+  ```
+
+  An index build, a VACUUM, an ANALYZE, a CLUSTER and a COPY are covered by a
+  view each. Everything else — a table rewrite, a backfill, a wait on a lock —
+  is covered by none of them, and those are the majority of slow migrations, so
+  the line then reports `pg_stat_activity` instead: the state, the wait event,
+  and how long the statement has been running. An hour-long
+  `CREATE INDEX CONCURRENTLY` that says nothing is an hour in which nobody knows
+  whether it is alive, and that was the whole of the previous behaviour.
+
+  It costs a second connection, which is why it is not unconditional.
+  `FromDSN` and `FromPool` can supply one and do so by default; `FromConn` hands
+  back the connection its caller already owns and cannot. That is *detected*
+  rather than assumed — both connections are asked for `pg_backend_pid()` before
+  the first statement runs — so a hand-written `Connector` wrapping a single
+  connection is caught as well. Nothing about it can fail a run: a pool with one
+  connection in it, a server that will not answer, a role that may not see the
+  backend, all mean no reporting and one line at debug level.
+
+  Nothing is polled unless a logger was given. The default logger discards
+  everything, so a library caller who never asked for one does not pay for the
+  connection; `--quiet` and `--log-level error` have the same effect. The lines
+  go to stderr and switch to JSON along with everything else under `--json`, so
+  a consumer piping stdout into `jq` never sees them.
+
+  `WithProgress`, `WithProgressInterval`, `--progress-interval` and
+  `MIGRATOR_PROGRESS_INTERVAL`.
 
 - **`migrator up --dry-run` predicts the locks.** Every statement is classified:
   which lock it takes, whether it rewrites the table, whether it scans it, and

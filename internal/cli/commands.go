@@ -839,6 +839,8 @@ func settingValue(c *config.Config, spec config.Spec) string {
 		return strconv.FormatBool(c.AllowOutOfOrder)
 	case "max-lock-level":
 		return c.MaxLockLevel
+	case "progress-interval":
+		return c.ProgressInterval.String()
 	default:
 		return ""
 	}

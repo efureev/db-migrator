@@ -206,6 +206,7 @@ func TestValidate(t *testing.T) {
 	bad := &Config{
 		Schema: "Public", Table: "a-b", Env: "someday", LogLevel: "loud",
 		Quiet: true, Verbose: true, Timeout: -time.Second,
+		ProgressInterval: -time.Second,
 	}
 
 	err := bad.Validate()
@@ -215,7 +216,9 @@ func TestValidate(t *testing.T) {
 
 	// Every problem at once: fixing a misconfigured deployment one restart at a
 	// time is the same waste as fixing a drifted schema one migration at a time.
-	for _, want := range []string{"--schema", "--table", "--env", "--log-level", "--quiet", "--timeout"} {
+	for _, want := range []string{
+		"--schema", "--table", "--env", "--log-level", "--quiet", "--timeout", "--progress-interval",
+	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Validate did not report %s:\n%v", want, err)
 		}
@@ -327,8 +330,9 @@ func TestLoadRejectsBadFlagValues(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	for flag, value := range map[string]string{
-		"timeout": "soon",
-		"json":    "perhaps",
+		"timeout":           "soon",
+		"json":              "perhaps",
+		"progress-interval": "often",
 	} {
 		if _, err := Load(nil, map[string]string{flag: value}); err == nil {
 			t.Errorf("Load accepted --%s=%s", flag, value)
@@ -347,5 +351,26 @@ func TestLoadRejectsBadFlagValues(t *testing.T) {
 
 	if cfg.Timeout != 90*time.Second {
 		t.Errorf("--timeout=90 became %v, want 90s", cfg.Timeout)
+	}
+}
+
+// TestZeroIsAValueAndNotAnAbsence: 0 means "never report", which is a thing
+// somebody types on purpose. Anything treating it as "unset" quietly restores
+// the default and reopens the connection the operator asked not to have — the
+// same mistake as "--to 0 did not roll everything back", in a different suit.
+func TestZeroIsAValueAndNotAnAbsence(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	cfg, err := Load(nil, map[string]string{"progress-interval": "0"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.ProgressInterval != 0 {
+		t.Errorf("--progress-interval=0 became %v, want 0", cfg.ProgressInterval)
+	}
+
+	if got := cfg.Origin("progress-interval"); got != "flag --progress-interval" {
+		t.Errorf("Origin = %q, want the flag that was typed", got)
 	}
 }

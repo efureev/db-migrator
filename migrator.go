@@ -196,8 +196,14 @@ func (m *Migrator) run(ctx context.Context, d Direction, t Target) (*Report, err
 			return err
 		}
 
+		// After the guards and after planning, so that a run which turned out
+		// to have nothing to do — most invocations in a pipeline — opens no
+		// second connection at all.
+		p := m.progressFor(ctx, s)
+		defer p.close(ctx)
+
 		for _, mig := range steps {
-			rec, err := m.applyOne(ctx, s, mig, d)
+			rec, err := m.applyOne(ctx, s, p, mig, d)
 			if err != nil {
 				return err
 			}
@@ -254,8 +260,11 @@ func (m *Migrator) redo(ctx context.Context, n int) (*Report, error) {
 			return err
 		}
 
+		p := m.progressFor(ctx, s)
+		defer p.close(ctx)
+
 		for _, mig := range down {
-			rec, err := m.applyOne(ctx, s, mig, DirectionDown)
+			rec, err := m.applyOne(ctx, s, p, mig, DirectionDown)
 			if err != nil {
 				return err
 			}
@@ -268,7 +277,7 @@ func (m *Migrator) redo(ctx context.Context, n int) (*Report, error) {
 		slices.Reverse(up)
 
 		for _, mig := range up {
-			rec, err := m.applyOne(ctx, s, mig, DirectionUp)
+			rec, err := m.applyOne(ctx, s, p, mig, DirectionUp)
 			if err != nil {
 				return err
 			}
@@ -289,7 +298,17 @@ func (m *Migrator) redo(ctx context.Context, n int) (*Report, error) {
 }
 
 // applyOne dispatches to the transactional or the no-transaction path.
-func (m *Migrator) applyOne(ctx context.Context, s Session, mig Migration, d Direction) (Record, error) {
+//
+// The watcher is started here rather than inside either path, because here is
+// the one place both of them pass through: the transactional path sends the
+// whole body in a single Exec, the other sends it a statement at a time, and a
+// migration that takes an hour is worth reporting on whichever it is.
+func (m *Migrator) applyOne(
+	ctx context.Context, s Session, p *progressWatcher, mig Migration, d Direction,
+) (Record, error) {
+	stop := p.watch(ctx, mig, d)
+	defer stop()
+
 	if noTransaction(mig, d) {
 		return m.applyNoTransaction(ctx, s, mig, d)
 	}
