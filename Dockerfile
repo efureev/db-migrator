@@ -69,7 +69,7 @@ CMD ["--help"]
 #
 # Published as <tag>-alpine, for an init container that wants
 # sh -c "migrator up && something-else".
-FROM alpine:3.22 AS shell
+FROM alpine:3.24 AS shell
 
 ARG VERSION=dev
 
