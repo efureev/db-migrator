@@ -2,6 +2,7 @@ package migrator
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -41,6 +42,7 @@ type config struct {
 	allowOutOfOrder    bool
 	environment        Environment
 	wipeProtectPattern string
+	dryRun             bool
 }
 
 func defaults() config {
@@ -102,6 +104,11 @@ func WithLogger(l *slog.Logger) Option {
 // A token of the form @name@ left unresolved after substitution is an error: a
 // mistyped @tabel@ must not reach PostgreSQL as a syntax error halfway through
 // a DDL script.
+// A key must be written with its delimiters, as "@name@". A bare "tenant"
+// would be a blind substring replacement over the whole file — rewriting
+// "tenants" and "tenant_id" too — and the unresolved-token check could not
+// notice, because there would be no token left to find. Such a key is rejected
+// when the Migrator is built.
 func WithPlaceholders(m map[string]string) Option {
 	return optionFunc(func(c *config) {
 		c.placeholders = make(map[string]string, len(m))
@@ -237,7 +244,11 @@ func (e Environment) MarshalText() ([]byte, error) { return []byte(e.String()), 
 // UnmarshalText implements [encoding.TextUnmarshaler], accepting the short
 // spellings people actually put in MIGRATOR_ENV.
 func (e *Environment) UnmarshalText(b []byte) error {
-	switch string(b) {
+	// Case-insensitive on purpose. config.Validate accepts "Production"
+	// because it lowercases before checking, and a mismatch here used to make
+	// the parse fail silently — after which the environment was *inferred*,
+	// and the production guard an operator had explicitly asked for was off.
+	switch strings.ToLower(strings.TrimSpace(string(b))) {
 	case "development", "dev", "test", "local":
 		*e = EnvDevelopment
 	case "staging", "stage":
@@ -251,6 +262,17 @@ func (e *Environment) UnmarshalText(b []byte) error {
 	}
 
 	return nil
+}
+
+// WithDryRun makes a destructive operation decide what it would do and then do
+// nothing.
+//
+// It is an option rather than a method argument because the guards run before
+// the work does: a dry run still has to pass [WithAllowWipe] and the
+// confirmation, so that "what would this drop" cannot become a way of asking
+// the question without the flags that make the answer meaningful.
+func WithDryRun() Option {
+	return optionFunc(func(c *config) { c.dryRun = true })
 }
 
 // WithWipeProtectPattern sets the regular expression that refuses a wipe by

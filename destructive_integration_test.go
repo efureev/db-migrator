@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -679,4 +680,188 @@ func TestRepairCompleteAndDiscard(t *testing.T) {
 			t.Errorf("Repair with no operations = %v, want %v", err, migrator.ErrNothingToDo)
 		}
 	})
+}
+
+// TestNoTransactionDownIsRecordedAsRolledBack pins a bug the unit tests could
+// not see: the no-transaction path closed out a rollback by setting
+// finished_at, the column that means "applied". InForce stayed true, so status
+// reported a migration as applied while the index it created was gone, and the
+// next Down would have rolled it back a second time.
+func TestNoTransactionDownIsRecordedAsRolledBack(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	testdb.Exec(t, dsn, `CREATE TABLE t (id int, c text)`)
+
+	m := newMigrator(t, dsn, map[string]string{
+		"1_index.up.sql": "-- migrator:no-transaction\n" +
+			"CREATE INDEX CONCURRENTLY i ON t (c);",
+		"1_index.down.sql": "-- migrator:no-transaction\n" +
+			"DROP INDEX CONCURRENTLY IF EXISTS i;",
+	}, migrator.WithAllowDown())
+
+	if _, err := m.Up(ctx(t)); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	if _, err := m.Down(ctx(t), migrator.Steps(1)); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+
+	if n := testdb.QueryInt(t, dsn,
+		`SELECT count(*) FROM pg_class WHERE relname = 'i'`); n != 0 {
+		t.Error("the index survived the rollback")
+	}
+
+	rolled := testdb.QueryInt(t, dsn,
+		`SELECT count(*) FROM public.schema_migrations
+		  WHERE version = 1 AND rolled_back_at IS NOT NULL`)
+	if rolled != 1 {
+		t.Fatal("the rollback was not recorded as one")
+	}
+
+	// Which is what makes it pending again rather than permanently "applied".
+	status, err := m.Status(ctx(t))
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+
+	if status.Current() != 0 || len(status.Pending()) != 1 {
+		t.Errorf("after the rollback: current=%d pending=%d", status.Current(), len(status.Pending()))
+	}
+}
+
+// TestRetrySafeIsHonoured: the directive was parsed and documented as changing
+// recovery behaviour, and read by nothing — so an operator who marked an
+// idempotent migration retry-safe still got a hard refusal after a crash.
+func TestRetrySafeIsHonoured(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+
+	// Fails the first time, leaving the row claimed and unconfirmed.
+	broken := newMigrator(t, dsn, map[string]string{
+		"1_a.up.sql": "-- migrator:no-transaction\n-- migrator:retry-safe\n" +
+			"CREATE TABLE IF NOT EXISTS a (id int);\nSELECT nope();",
+	})
+
+	if _, err := broken.Up(ctx(t)); err == nil {
+		t.Fatal("Up succeeded on an invalid migration")
+	}
+
+	if n := testdb.QueryInt(t, dsn,
+		`SELECT count(*) FROM public.schema_migrations WHERE finished_at IS NULL`); n != 1 {
+		t.Fatal("no unconfirmed row was left")
+	}
+
+	// The author declared it idempotent, so the fixed migration runs rather
+	// than being refused. Without the directive this is ErrIncomplete.
+	fixed := newMigrator(t, dsn, map[string]string{
+		"1_a.up.sql": "-- migrator:no-transaction\n-- migrator:retry-safe\n" +
+			"CREATE TABLE IF NOT EXISTS a (id int);",
+	})
+
+	if _, err := fixed.Up(ctx(t)); err != nil {
+		t.Fatalf("a retry-safe migration was still refused: %v", err)
+	}
+
+	if !testdb.TableExists(t, dsn, "public", "a") {
+		t.Error("the retried migration did not run")
+	}
+}
+
+// TestWipeDryRunListsAndDropsNothing: the flag used to withhold WithAllowWipe,
+// so a dry run was refused by the guard before it enumerated anything.
+func TestWipeDryRunListsAndDropsNothing(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	database := databaseOf(t, dsn)
+
+	m := newMigrator(t, dsn, twoTables, migrator.WithAllowWipe(), migrator.WithDryRun())
+	if _, err := m.Up(ctx(t)); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	report, err := m.Wipe(ctx(t), migrator.Confirm(database))
+	if err != nil {
+		t.Fatalf("dry-run Wipe: %v", err)
+	}
+
+	if !report.DryRun {
+		t.Error("the report does not say it was a dry run")
+	}
+
+	if len(report.Dropped) == 0 {
+		t.Error("a dry run listed nothing")
+	}
+
+	for _, name := range []string{"a", "b", "schema_migrations"} {
+		if !testdb.TableExists(t, dsn, "public", name) {
+			t.Errorf("the dry run dropped %q", name)
+		}
+	}
+}
+
+// TestWipeHandlesOverloadedRoutines: DROP ROUTINE by bare name fails with 42725
+// when a schema holds f(int) and f(text), and inside the single transaction a
+// wipe runs in, that discards every drop already issued.
+func TestWipeHandlesOverloadedRoutines(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	database := databaseOf(t, dsn)
+
+	testdb.Exec(t, dsn, `CREATE FUNCTION f(int) RETURNS int LANGUAGE sql AS 'SELECT $1'`)
+	testdb.Exec(t, dsn, `CREATE FUNCTION f(text) RETURNS text LANGUAGE sql AS 'SELECT $1'`)
+
+	m := newMigrator(t, dsn, twoTables, migrator.WithAllowWipe())
+	if _, err := m.Up(ctx(t)); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	if _, err := m.Wipe(ctx(t), migrator.Confirm(database)); err != nil {
+		t.Fatalf("Wipe over an overloaded function: %v", err)
+	}
+
+	if n := testdb.QueryInt(t, dsn,
+		`SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		  WHERE n.nspname = 'public' AND p.proname = 'f'`); n != 0 {
+		t.Errorf("%d overloads of f survived the wipe", n)
+	}
+}
+
+// TestRunSettingsAreRestoredNotReset: RESET restores the server default, not
+// what the session had. A pool with statement_timeout=30s used to get its
+// connection back with no timeout at all.
+func TestRunSettingsAreRestoredNotReset(t *testing.T) {
+	t.Parallel()
+
+	dsn := testdb.Fresh(t)
+	conn := testdb.Connect(t, dsn)
+
+	if _, err := conn.Exec(ctx(t), `SET statement_timeout = '30s'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// A no-transaction migration takes the path that sets and restores by hand.
+	m, err := migrator.New(migrator.FromConn(conn), src(map[string]string{
+		"1_a.up.sql": "-- migrator:no-transaction\nCREATE TABLE a (id int);",
+	}), migrator.WithStatementTimeout(time.Hour))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := m.Up(ctx(t)); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	var after string
+	if err := conn.QueryRow(ctx(t), `SHOW statement_timeout`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+
+	if after != "30s" {
+		t.Errorf("statement_timeout is %q after the run, want the session's own 30s", after)
+	}
 }

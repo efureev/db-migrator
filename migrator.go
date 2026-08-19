@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -22,8 +23,11 @@ type Migrator struct {
 	cfg  config
 
 	// replacer is the placeholder substitution flattened into the pairs
-	// strings.NewReplacer wants, built once because it is applied per migration.
-	replacer []string
+	// strings.NewReplacer wants; replacerOnce is the Replacer built from them,
+	// built here rather than per call because substitute runs once per
+	// migration and once more per Plan step.
+	replacer     []string
+	replacerOnce *strings.Replacer
 }
 
 // New builds a Migrator over the migrations in fsys, reachable through c.
@@ -66,11 +70,39 @@ func New(c Connector, fsys fs.FS, opts ...Option) (*Migrator, error) {
 	// The schema is always available as a placeholder, so that a migration
 	// written for a configurable schema needs no extra wiring.
 	pairs := []string{"@schema@", cfg.schema}
-	for k, v := range cfg.placeholders {
-		pairs = append(pairs, k, v)
+
+	// Sorted, not in map order. strings.NewReplacer resolves competing patterns
+	// by argument order, so with "@db@" and "@db_ro@" the winner would
+	// otherwise depend on Go's randomised map iteration — the same binary over
+	// the same files producing different SQL between runs, which the checksum
+	// cannot catch because it is taken before substitution.
+	keys := make([]string, 0, len(cfg.placeholders))
+
+	for k := range cfg.placeholders {
+		if !placeholderPattern.MatchString(k) {
+			return nil, fmt.Errorf("%w: placeholder key %q must be written as @name@",
+				ErrUnresolvedPlaceholder, k)
+		}
+
+		keys = append(keys, k)
+	}
+
+	// Longest first, so that "@db_ro@" is matched before "@db@" would consume
+	// its prefix.
+	slices.SortFunc(keys, func(a, b string) int {
+		if len(a) != len(b) {
+			return len(b) - len(a)
+		}
+
+		return strings.Compare(a, b)
+	})
+
+	for _, k := range keys {
+		pairs = append(pairs, k, cfg.placeholders[k])
 	}
 
 	m.replacer = pairs
+	m.replacerOnce = strings.NewReplacer(pairs...)
 
 	return m, nil
 }
@@ -180,7 +212,13 @@ func (m *Migrator) run(ctx context.Context, d Direction, t Target) (*Report, err
 		return report, err
 	}
 
-	report.OneTransaction = true
+	// True only when the run really was one transaction: a single migration
+	// that ran inside one. Two migrations are two transactions, and a
+	// no-transaction migration is none. Reporting otherwise would tell a caller
+	// deciding whether a failed deploy needs inspecting that the run was atomic
+	// when it was not.
+	report.OneTransaction = len(report.Applied) == 1 &&
+		!slices.ContainsFunc(report.Applied, func(rec Record) bool { return !rec.Transactional })
 
 	return report, nil
 }

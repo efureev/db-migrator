@@ -29,10 +29,12 @@ const (
 	// ExitRefused is a destructive operation turned down by a guard. Retrying
 	// is pointless; the pipeline is what needs changing, not the database.
 	ExitRefused = 6
-	// ExitInterrupted is 128 + SIGINT, as a shell reports it.
+	// ExitInterrupted is 128 + SIGINT, as a shell reports it. SIGTERM is
+	// reported the same way rather than as 143: a signal handler that cancels
+	// the context and unwinds cannot tell the caller which signal arrived by
+	// the time it exits, and inventing a second code would be a distinction
+	// this program does not actually make.
 	ExitInterrupted = 130
-	// ExitTerminated is 128 + SIGTERM.
-	ExitTerminated = 143
 )
 
 // ExitCode reports the code an error should exit with.

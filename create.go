@@ -86,14 +86,22 @@ type Pair struct {
 // The directives are listed here, commented out, so that somebody reaching for
 // CREATE INDEX CONCURRENTLY finds the answer in the file they are already
 // editing rather than in a README they have not opened.
-const defaultUpTemplate = `-- Directives, if this migration needs them. They must stay above the SQL.
+const defaultUpTemplate = `-- Write the migration below.
 --
--- migrator:no-transaction      -- required by CREATE INDEX CONCURRENTLY
---                                 and ALTER TYPE ... ADD VALUE
--- migrator:retry-safe          -- this migration is idempotent and may be
---                                 re-run after an interrupted attempt
--- migrator:statement-timeout 30m
--- migrator:lock-timeout 5s
+-- If it needs a directive, add one above the SQL, one per line, in the form
+-- shown here with the leading marker restored:
+--
+--   ..migrator:no-transaction        required by CREATE INDEX CONCURRENTLY
+--                                    and ALTER TYPE ... ADD VALUE
+--   ..migrator:retry-safe            this migration is idempotent and may be
+--                                    re-run after an interrupted attempt
+--   ..migrator:statement-timeout 30m
+--   ..migrator:lock-timeout 5s
+--
+-- Replace the ".." with "-- " when you use one. They are written that way here
+-- because a real directive in this template would apply to every migration
+-- this tool creates — and "-- migrator:no-transaction" on an ordinary
+-- migration costs it the atomicity of its own bookkeeping.
 
 `
 

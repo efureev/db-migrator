@@ -89,16 +89,17 @@ func (r *Report) Text(w io.Writer) error {
 
 	var b strings.Builder
 
-	verb := "applied"
-	if r.Direction == DirectionDown {
-		verb = "reverted"
-	}
-
 	for _, rec := range r.Applied {
-		state := verb
-		if rec.RolledBackAt != nil {
+		// Decided per record, not per report. A Redo reports DirectionDown and
+		// holds both halves, so a verb taken from the direction would label the
+		// re-applied migration "reverted" — the exact inverse of what happened
+		// to it.
+		state := "applied"
+
+		switch {
+		case rec.RolledBackAt != nil:
 			state = "reverted"
-		} else if !rec.InForce() {
+		case !rec.InForce():
 			state = "INCOMPLETE"
 		}
 

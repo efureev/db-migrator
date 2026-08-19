@@ -204,6 +204,19 @@ func (m *Migrator) checkDrift(applied map[int64]Record) error {
 
 	for version, rec := range applied {
 		if rec.Incomplete() {
+			// A migration whose author declared it idempotent may be re-run
+			// rather than refused: the decision is made in the file, by whoever
+			// knows whether re-running is safe, and not by a flag reached for at
+			// three in the morning. Without that declaration this is a hard
+			// refusal, because a failed CREATE INDEX CONCURRENTLY leaves an
+			// invalid index that a second CONCURRENTLY will not replace.
+			if mig, ok := m.set.ByVersion(version); ok && mig.Directives.RetrySafe {
+				m.cfg.logger.Warn("migrator: re-running an interrupted migration marked retry-safe",
+					"version", version, "name", rec.Name)
+
+				continue
+			}
+
 			problems = append(problems, fmt.Errorf("%w: %d_%s started at %s by %s",
 				ErrIncomplete, version, rec.Name, rec.AppliedAt.Format(time.RFC3339), rec.AppliedBy))
 
@@ -246,8 +259,8 @@ func (m *Migrator) checkDrift(applied map[int64]Record) error {
 // mistyped @tabel@ would otherwise reach PostgreSQL as a syntax error partway
 // through a DDL script, which is the worst moment to discover a typo.
 func (m *Migrator) substitute(body string) (string, error) {
-	if len(m.replacer) > 0 {
-		body = strings.NewReplacer(m.replacer...).Replace(body)
+	if m.replacerOnce != nil {
+		body = m.replacerOnce.Replace(body)
 	}
 
 	if leftover := placeholderPattern.FindString(body); leftover != "" {

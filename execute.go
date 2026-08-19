@@ -62,17 +62,49 @@ func (m *Migrator) applySettings(ctx context.Context, c Conn, d Directives, loca
 	return nil
 }
 
-// resetSettings puts the session back the way it was found.
+// runSettings are the GUCs a run overrides.
+var runSettings = []string{"statement_timeout", "lock_timeout"}
+
+// captureSettings reads the values the session had before the run changed them.
+//
+// RESET would be shorter and wrong: it restores the server or role default, not
+// what this session actually had. A pool configured with statement_timeout=30s
+// would get its connection back with no timeout at all, and every later
+// application query on it would run unbounded.
+func (m *Migrator) captureSettings(ctx context.Context, c Conn) map[string]string {
+	out := make(map[string]string, len(runSettings))
+
+	for _, name := range runSettings {
+		var value string
+		if err := c.QueryRow(ctx, `SELECT current_setting($1, true)`, name).Scan(&value); err != nil {
+			m.cfg.logger.Debug("migrator: could not read a run setting", "setting", name, "error", redact(err))
+
+			continue
+		}
+
+		out[name] = value
+	}
+
+	return out
+}
+
+// restoreSettings puts back what captureSettings read.
 //
 // Only reached on the no-transaction path; the transactional path uses SET
 // LOCAL and is undone by COMMIT or ROLLBACK.
-func (m *Migrator) resetSettings(c Conn) {
+func (m *Migrator) restoreSettings(c Conn, saved map[string]string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 5*time.Second)
 	defer cancel()
 
-	for _, stmt := range []string{"RESET statement_timeout", "RESET lock_timeout"} {
+	for name, value := range saved {
+		stmt := "RESET " + name
+		if value != "" {
+			stmt = fmt.Sprintf("SET %s = %s", name, quoteLiteral(value))
+		}
+
 		if _, err := c.Exec(ctx, stmt); err != nil {
-			m.cfg.logger.Debug("migrator: could not reset a run setting", "error", redact(err))
+			m.cfg.logger.Debug("migrator: could not restore a run setting",
+				"setting", name, "error", redact(err))
 		}
 	}
 }
@@ -215,10 +247,13 @@ func (m *Migrator) applyNoTransaction(
 		return Record{}, err
 	}
 
+	saved := m.captureSettings(ctx, s)
+
 	if err := m.applySettings(ctx, s, directives, false); err != nil {
 		return Record{}, err
 	}
-	defer m.resetSettings(s)
+
+	defer m.restoreSettings(s, saved)
 
 	for i, stmt := range stmts {
 		if _, err := s.Exec(ctx, stmt.SQL); err != nil {
@@ -230,7 +265,7 @@ func (m *Migrator) applyNoTransaction(
 		}
 	}
 
-	return m.confirm(ctx, s, mig, time.Since(started))
+	return m.confirm(ctx, s, mig, d, time.Since(started))
 }
 
 // claim commits the "started" row of a no-transaction migration.
@@ -262,11 +297,24 @@ func (m *Migrator) claim(ctx context.Context, s Session, mig Migration, d Direct
 	return nil
 }
 
-// confirm marks a claimed no-transaction migration finished.
-func (m *Migrator) confirm(ctx context.Context, s Session, mig Migration, took time.Duration) (Record, error) {
+// confirm closes out a no-transaction migration.
+//
+// Going up that means marking the claimed row finished. Going down it means
+// marking the row rolled back, exactly as the transactional path does — a
+// rollback that only set finished_at would leave InForce true, so status would
+// report a migration as applied while the object it created was gone, and the
+// next Down would happily roll it back again.
+func (m *Migrator) confirm(
+	ctx context.Context, s Session, mig Migration, d Direction, took time.Duration,
+) (Record, error) {
+	set := `finished_at = now(), execution_ms = $2`
+	if d == DirectionDown {
+		set = `rolled_back_at = now(), execution_ms = $2`
+	}
+
 	rec, err := scanRecord(s.QueryRow(ctx, fmt.Sprintf(
-		`UPDATE %s SET finished_at = now(), execution_ms = $2
-		  WHERE version = $1 RETURNING %s`, m.qualified(), recordColumns),
+		`UPDATE %s SET %s WHERE version = $1 RETURNING %s`,
+		m.qualified(), set, recordColumns),
 		mig.Version, took.Milliseconds()))
 	if err != nil {
 		return Record{}, fmt.Errorf("%w: confirm %s: %w", ErrBookkeeping, mig, redact(err))

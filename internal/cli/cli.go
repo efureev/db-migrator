@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/signal"
 	"slices"
@@ -35,9 +34,10 @@ type command struct {
 	name    string
 	aliases []string
 	summary string
-	// needsDB marks a command that opens a connection. `create` does not, and
-	// keeping that true is the point of the field: writing a migration is
-	// something people do offline, before the connection details exist.
+	// needsDB marks a command that opens a connection. It is enforced, not
+	// documentation: [env.open] refuses to run for a command that declared it
+	// does not need a database, so "create works on a plane" cannot quietly
+	// stop being true.
 	needsDB bool
 	run     func(*env, []string) error
 	usage   func(io.Writer)
@@ -49,6 +49,7 @@ type env struct {
 	ui      *ui.UI
 	streams Streams
 	ctx     context.Context
+	cmd     command
 }
 
 // Run parses args, runs the command they name and reports the exit code.
@@ -115,6 +116,7 @@ func run(ctx context.Context, args []string, streams Streams) (int, error) {
 		}),
 		streams: streams,
 		ctx:     ctx,
+		cmd:     cmd,
 	}
 
 	if cfg.Timeout > 0 {
@@ -298,6 +300,12 @@ func noColorFromEnv() bool {
 
 // open builds a Migrator from the resolved configuration.
 func (e *env) open(extra ...migrator.Option) (*migrator.Migrator, error) {
+	if !e.cmd.needsDB {
+		// A programming error, not a user one: a command that declared it needs
+		// no database has just tried to open one.
+		return nil, fmt.Errorf("migrator: command %q declared needsDB=false and opened a database", e.cmd.name)
+	}
+
 	dir := e.cfg.Dir
 
 	opts := []migrator.Option{
@@ -377,17 +385,15 @@ func errorf(format string, args ...any) error { return fmt.Errorf(format, args..
 // The absence of a terminal is a refusal, never a prompt nobody can answer and
 // never a silent yes. Waiting for input that cannot arrive is how a tool wedges
 // a CI job until its timeout.
-func (e *env) confirmed(prompt, expect string, yes bool) error {
-	if yes && expect == "" {
+// Naming a database is a stronger confirmation and is handled by --confirm,
+// which the library checks against current_database(); this is only the y/N
+// question for the operations where that would be overkill.
+func (e *env) confirmed(prompt string, yes bool) error {
+	if yes {
 		return nil
 	}
 
 	if !isTerminal(e.streams.In) {
-		if expect != "" {
-			return fmt.Errorf("%w: standard input is not a terminal; pass --confirm %s",
-				migrator.ErrNotConfirmed, expect)
-		}
-
 		return fmt.Errorf("%w: standard input is not a terminal; pass --yes",
 			migrator.ErrNotConfirmed)
 	}
@@ -399,21 +405,12 @@ func (e *env) confirmed(prompt, expect string, yes bool) error {
 		return fmt.Errorf("%w: %w", migrator.ErrNotConfirmed, err)
 	}
 
-	answer = strings.TrimSpace(answer)
-
-	if expect != "" {
-		if answer != expect {
-			return fmt.Errorf("%w: %q does not match %q", migrator.ErrNotConfirmed, answer, expect)
-		}
-
+	switch strings.TrimSpace(answer) {
+	case "y", "Y", "yes":
 		return nil
-	}
-
-	if answer != "y" && answer != "Y" && answer != "yes" {
+	default:
 		return fmt.Errorf("%w: not confirmed", migrator.ErrNotConfirmed)
 	}
-
-	return nil
 }
 
 // isTerminal reports whether r is a terminal.
@@ -433,18 +430,13 @@ func isTerminal(r io.Reader) bool {
 
 // flagSet builds a FlagSet that reports its errors through the usage machinery
 // rather than printing to stderr on its own.
-func flagSet(name string, out io.Writer) *flag.FlagSet {
+func flagSet(name string) *flag.FlagSet {
 	set := flag.NewFlagSet(name, flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	set.Usage = func() {}
 
-	_ = out
-
 	return set
 }
-
-// dirFS reports the migrations directory as an fs.FS.
-func dirFS(dir string) fs.FS { return os.DirFS(dir) }
 
 // wantsHelp reports whether the remaining arguments ask for the command's help.
 func wantsHelp(args []string) bool {

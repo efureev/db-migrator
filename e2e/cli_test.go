@@ -306,13 +306,18 @@ func TestLockedExitCode(t *testing.T) {
 	t.Parallel()
 
 	dsn := testdb.Fresh(t)
-	dir := project(t, map[string]string{"1_slow.up.sql": "SELECT pg_sleep(3);"})
+	dir := project(t, map[string]string{"1_slow.up.sql": "SELECT pg_sleep(10);"})
 
 	done := make(chan result, 1)
 
-	go func() { done <- runMigrator(t, dir, dsn, "up", "--advisory-lock-timeout", "30s") }()
+	go func() { done <- runMigrator(t, dir, dsn, "up", "--advisory-lock-timeout", "60s") }()
 
-	time.Sleep(time.Second)
+	// Waiting for the lock to actually appear rather than sleeping a guessed
+	// interval. A fixed sleep raced the holder's process startup, and under
+	// -race with the other tests running in parallel the holder sometimes had
+	// not acquired anything yet — so the "waiter" won the lock and the test
+	// failed for a reason that had nothing to do with what it checks.
+	waitForAdvisoryLock(t, dsn)
 
 	got := runMigrator(t, dir, dsn, "up", "--advisory-lock-timeout", "200ms")
 	if got.code != exitLocked {
@@ -322,6 +327,28 @@ func TestLockedExitCode(t *testing.T) {
 	if held := <-done; held.code != exitOK {
 		t.Errorf("the holder exited %d: %s", held.code, held.stderr)
 	}
+}
+
+// waitForAdvisoryLock blocks until some backend in this test's database holds
+// an advisory lock, or the test times out.
+func waitForAdvisoryLock(t *testing.T, dsn string) {
+	t.Helper()
+
+	deadline := time.Now().Add(30 * time.Second)
+
+	for time.Now().Before(deadline) {
+		held := testdb.QueryInt(t, dsn, `
+			SELECT count(*) FROM pg_locks l
+			  JOIN pg_stat_activity a ON a.pid = l.pid
+			 WHERE l.locktype = 'advisory' AND a.datname = current_database()`)
+		if held > 0 {
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatal("no advisory lock appeared: the holding process never started")
 }
 
 // TestStreams: the answer goes to stdout so it can be piped, the commentary to

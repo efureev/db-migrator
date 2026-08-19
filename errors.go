@@ -53,8 +53,6 @@ var (
 	ErrOutOfOrder = errors.New("migrator: pending migration is older than the current version")
 	// ErrUnresolvedPlaceholder reports an @name@ token left after substitution.
 	ErrUnresolvedPlaceholder = errors.New("migrator: placeholder left unresolved")
-	// ErrNotInitialised reports a bookkeeping table that does not exist.
-	ErrNotInitialised = errors.New("migrator: bookkeeping table does not exist")
 	// ErrBookkeeping reports a bookkeeping table that exists but is unusable.
 	ErrBookkeeping = errors.New("migrator: bookkeeping table is not usable")
 	// ErrNothingToDo reports a run with no work in it. It is returned only

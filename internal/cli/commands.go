@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -35,7 +37,7 @@ happen. A migration carrying "-- migrator:no-transaction" runs outside one.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("up", e.streams.Err)
+		fs := flagSet("up")
 		to := fs.Int64("to", 0, "")
 		steps := fs.Int("steps", 0, "")
 		dryRun := fs.Bool("dry-run", false, "")
@@ -43,7 +45,10 @@ happen. A migration carrying "-- migrator:no-transaction" runs outside one.
 			return joinUsage(err)
 		}
 
-		target, err := targetOf(*to, *steps)
+		// Whether a flag was given, not whether its value is non-zero: 0 is a
+		// legitimate target ("roll back everything") and using it as the
+		// "unset" sentinel made --to 0 silently mean something else.
+		target, err := targetOf(fs, *to, *steps)
 		if err != nil {
 			return err
 		}
@@ -83,7 +88,7 @@ that.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("down", e.streams.Err)
+		fs := flagSet("down")
 		to := fs.Int64("to", 0, "")
 		steps := fs.Int("steps", 0, "")
 		allow := fs.Bool("allow-down", false, "")
@@ -97,11 +102,11 @@ that.
 		var target migrator.Target
 
 		switch {
-		case *to != 0 && *steps != 0:
+		case given(fs, "to") && given(fs, "steps"):
 			return usageErrorf("--to and --steps cannot both be given")
-		case *to != 0:
+		case given(fs, "to"):
 			target = migrator.ToVersion(*to)
-		case *steps != 0:
+		case given(fs, "steps"):
 			target = migrator.Steps(*steps)
 		default:
 			// One step: rolling back everything by default is not a thing
@@ -129,7 +134,7 @@ that.
 			return e.showPlan(m, migrator.DirectionDown, target)
 		}
 
-		if err := e.confirmed("Roll back? [y/N]: ", "", *yes); err != nil {
+		if err := e.confirmed("Roll back? [y/N]: ", *yes); err != nil {
 			return err
 		}
 
@@ -157,7 +162,7 @@ development half of what "fresh" used to be; the destructive half is
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("redo", e.streams.Err)
+		fs := flagSet("redo")
 		steps := fs.Int("steps", 1, "")
 		allow := fs.Bool("allow-down", false, "")
 		yes := fs.Bool("yes", false, "")
@@ -175,7 +180,7 @@ development half of what "fresh" used to be; the destructive half is
 			return err
 		}
 
-		if err := e.confirmed(fmt.Sprintf("Redo the last %d migration(s)? [y/N]: ", *steps), "", *yes); err != nil {
+		if err := e.confirmed(fmt.Sprintf("Redo the last %d migration(s)? [y/N]: ", *steps), *yes); err != nil {
 			return err
 		}
 
@@ -203,7 +208,7 @@ read-only role.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("status", e.streams.Err)
+		fs := flagSet("status")
 		check := fs.Bool("check", false, "")
 		current := fs.Bool("current", false, "")
 		if err := fs.Parse(args); err != nil {
@@ -274,7 +279,7 @@ hour.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("validate", e.streams.Err)
+		fs := flagSet("validate")
 		strict := fs.Bool("strict", false, "")
 		offline := fs.Bool("offline", false, "")
 		if err := fs.Parse(args); err != nil {
@@ -282,7 +287,7 @@ hour.
 		}
 
 		if *offline {
-			set, err := migrator.Load(dirFS(e.cfg.Dir))
+			set, err := migrator.Load(os.DirFS(e.cfg.Dir))
 			if err != nil {
 				return err
 			}
@@ -329,7 +334,7 @@ Writes <version>_<name>.up.sql and its down file. No database is opened.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("create", e.streams.Err)
+		fs := flagSet("create")
 		format := fs.String("format", "timestamp", "")
 		noDown := fs.Bool("no-down", false, "")
 		if err := fs.Parse(args); err != nil {
@@ -377,7 +382,7 @@ var repairCmd = command{
 	name: "repair", summary: "fix the journal without touching the schema", needsDB: true,
 	usage: func(w io.Writer) {
 		fmt.Fprint(w, `migrator repair (--rehash <version> | --complete <version> |
-                 --discard <version> | --prune) [--confirm <database>]
+                 --discard <version> | --prune)
 
 Edits the journal and never the schema. This exists so that no flag on "up"
 has to: a --force on the command that applies migrations gets reached for in a
@@ -387,11 +392,13 @@ hurry, at exactly the moment the loud refusal was doing its job.
   --complete <v>   mark an interrupted no-transaction migration as finished
   --discard <v>    forget version v, so that it runs again
   --prune          forget every recorded version whose file is gone
-  --confirm <db>   name the database; required outside development
+
+Repair never runs the SQL of a migration and never touches the schema, so it is
+available in every environment — including the one where it is needed most.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("repair", e.streams.Err)
+		fs := flagSet("repair")
 		rehash := fs.Int64("rehash", 0, "")
 		complete := fs.Int64("complete", 0, "")
 		discard := fs.Int64("discard", 0, "")
@@ -467,7 +474,7 @@ means "I know which database this is", and a typo in the name is what saves you.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("wipe", e.streams.Err)
+		fs := flagSet("wipe")
 		allow := fs.Bool("allow-wipe", false, "")
 		confirm := fs.String("confirm", "", "")
 		dryRun := fs.Bool("dry-run", false, "")
@@ -479,18 +486,19 @@ means "I know which database this is", and a typo in the name is what saves you.
 			return fmt.Errorf("%w: wipe needs --allow-wipe", migrator.ErrWipeRefused)
 		}
 
-		var opts []migrator.Option
-		if !*dryRun {
-			opts = append(opts, migrator.WithAllowWipe())
+		// A dry run passes the same guards as a real one. "What would this
+		// drop" must not become a way of asking without the flags that make the
+		// answer meaningful.
+		opts := []migrator.Option{migrator.WithAllowWipe()}
+		if *dryRun {
+			opts = append(opts, migrator.WithDryRun())
+
+			e.ui.Note("dry run: nothing will be dropped")
 		}
 
 		m, err := e.open(opts...)
 		if err != nil {
 			return err
-		}
-
-		if *dryRun {
-			e.ui.Note("dry run: nothing will be dropped")
 		}
 
 		if *confirm == "" {
@@ -502,8 +510,13 @@ means "I know which database this is", and a typo in the name is what saves you.
 			return err
 		}
 
+		verb := "dropped "
+		if report.DryRun {
+			verb = "would drop "
+		}
+
 		for _, o := range report.Dropped {
-			e.ui.Line("  dropped " + o.String())
+			e.ui.Line("  " + verb + o.String())
 		}
 
 		for _, o := range report.Kept {
@@ -517,7 +530,7 @@ means "I know which database this is", and a typo in the name is what saves you.
 }
 
 var configCmd = command{
-	name: "config", summary: "show the resolved configuration and where it came from",
+	name: "config", needsDB: false, summary: "show the resolved configuration and where it came from",
 	usage: func(w io.Writer) {
 		fmt.Fprint(w, `migrator config [--show-secrets]
 
@@ -528,7 +541,7 @@ character that needed escaping.
 `)
 	},
 	run: func(e *env, args []string) error {
-		fs := flagSet("config", e.streams.Err)
+		fs := flagSet("config")
 		showSecrets := fs.Bool("show-secrets", false, "")
 		if err := fs.Parse(args); err != nil {
 			return joinUsage(err)
@@ -628,17 +641,34 @@ Run "migrator help <command>" for the details of one command.
 }
 
 // targetOf turns the --to and --steps flags into a Target.
-func targetOf(to int64, steps int) (migrator.Target, error) {
+//
+// It asks the FlagSet which flags were actually given rather than testing their
+// values, because 0 is a meaningful value for both and using it as the "not
+// given" sentinel made "--to 0" quietly mean "--to was not passed".
+func targetOf(fs *flag.FlagSet, to int64, steps int) (migrator.Target, error) {
 	switch {
-	case to != 0 && steps != 0:
+	case given(fs, "to") && given(fs, "steps"):
 		return migrator.Target{}, usageErrorf("--to and --steps cannot both be given")
-	case to != 0:
+	case given(fs, "to"):
 		return migrator.ToVersion(to), nil
-	case steps != 0:
+	case given(fs, "steps"):
 		return migrator.Steps(steps), nil
 	default:
 		return migrator.All(), nil
 	}
+}
+
+// given reports whether a flag appeared on the command line.
+func given(fs *flag.FlagSet, name string) bool {
+	var seen bool
+
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			seen = true
+		}
+	})
+
+	return seen
 }
 
 // showPlan renders what a run would do.

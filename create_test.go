@@ -46,15 +46,29 @@ func TestCreate(t *testing.T) {
 		}
 	}
 
-	// The up template lists the directives, so that somebody reaching for
-	// CREATE INDEX CONCURRENTLY finds the answer in the file they are editing.
+	// The template shows the directives, and must not carry them.
+	//
+	// The first version of it listed them as ordinary comment lines, which is
+	// exactly the syntax of a real directive: every migration this tool created
+	// silently ran outside a transaction, losing the atomicity of its own
+	// bookkeeping — the property the package doc leads with.
 	up, err := os.ReadFile(pair.UpPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(string(up), "migrator:no-transaction") {
-		t.Error("the up template does not mention the directives")
+	if !strings.Contains(string(up), "no-transaction") {
+		t.Error("the up template does not mention the directives at all")
+	}
+
+	directives, err := ParseDirectives(Normalise(up))
+	if err != nil {
+		t.Fatalf("the template does not parse: %v", err)
+	}
+
+	if directives.NoTransaction || directives.RetrySafe ||
+		directives.StatementTimeout != 0 || directives.LockTimeout != 0 {
+		t.Errorf("the template carries live directives: %+v", directives)
 	}
 
 	// What Create writes, Load must accept.

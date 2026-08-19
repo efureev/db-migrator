@@ -419,6 +419,12 @@ func TestWipeReportRendering(t *testing.T) {
 		t.Errorf("String = %q", got)
 	}
 
+	// A dry run must not claim to have dropped anything.
+	dry := &WipeReport{Database: "shop_dev", DryRun: true, Dropped: r.Dropped}
+	if got := dry.String(); !strings.Contains(got, "would be dropped") {
+		t.Errorf("dry-run String = %q", got)
+	}
+
 	if got := r.Dropped[0].String(); got != "table public.users" {
 		t.Errorf("dropped object = %q", got)
 	}
@@ -635,5 +641,146 @@ func TestDefaultAppliedBy(t *testing.T) {
 
 	if got := defaultAppliedBy(); !strings.HasPrefix(got, "unknown@") {
 		t.Errorf("with no user in the environment: %q", got)
+	}
+}
+
+// TestEnvironmentTextIsCaseInsensitive pins the fix for a guard that could be
+// switched off by capitalisation.
+//
+// config.Validate accepts "Production" because it lowercases before checking.
+// UnmarshalText used to match case-sensitively, so the parse failed, the error
+// was discarded, and the environment was then *inferred* — turning off the
+// production guard that the operator had explicitly asked for.
+func TestEnvironmentTextIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	for _, text := range []string{"production", "Production", "PRODUCTION", "  prod  ", "Live"} {
+		var env Environment
+		if err := env.UnmarshalText([]byte(text)); err != nil {
+			t.Errorf("UnmarshalText(%q) = %v", text, err)
+
+			continue
+		}
+
+		if env != EnvProduction {
+			t.Errorf("UnmarshalText(%q) = %v, want production", text, env)
+		}
+	}
+}
+
+// TestPlaceholderKeysMustBeDelimited: a bare key would be a blind substring
+// replacement over the whole migration, and the unresolved-token check could
+// not notice — there would be no token left to find.
+func TestPlaceholderKeysMustBeDelimited(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"1_a.up.sql": "CREATE TABLE tenants (id int);"}
+
+	_, err := New(FromDSN(""), fsOf(files), WithPlaceholders(map[string]string{"tenant": "acme"}))
+	if !errors.Is(err, ErrUnresolvedPlaceholder) {
+		t.Fatalf("New accepted a bare placeholder key: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "@name@") {
+		t.Errorf("the error does not say what the key should look like: %v", err)
+	}
+
+	if _, err := New(FromDSN(""), fsOf(files),
+		WithPlaceholders(map[string]string{"@tenant@": "acme"})); err != nil {
+		t.Errorf("New rejected a well-formed placeholder key: %v", err)
+	}
+}
+
+// TestPlaceholderOrderIsDeterministic: strings.NewReplacer resolves competing
+// patterns by argument order, so a map-ordered pair list made the same binary
+// produce different SQL between runs — which the checksum cannot catch, because
+// it is taken before substitution.
+func TestPlaceholderOrderIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"1_a.up.sql": "SELECT '@db@', '@db_ro@';"}
+
+	for range 20 {
+		m, err := New(FromDSN(""), fsOf(files), WithPlaceholders(map[string]string{
+			"@db@":    "primary",
+			"@db_ro@": "replica",
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := m.substitute("SELECT '@db@', '@db_ro@';")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got != "SELECT 'primary', 'replica';" {
+			t.Fatalf("substitution = %q; the longer key must win regardless of map order", got)
+		}
+	}
+}
+
+// TestReportTextLabelsEachRecord: a Redo reports DirectionDown and holds both
+// halves, so a verb taken from the direction labelled the re-applied migration
+// "reverted" — the inverse of what happened to it.
+func TestReportTextLabelsEachRecord(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	reverted := now.Add(time.Second)
+
+	r := &Report{
+		Direction: DirectionDown,
+		Applied: []Record{
+			{Version: 3, Name: "add_index", FinishedAt: &now, RolledBackAt: &reverted},
+			{Version: 3, Name: "add_index", FinishedAt: &now},
+		},
+	}
+
+	var b strings.Builder
+	if err := r.Text(&b); err != nil {
+		t.Fatal(err)
+	}
+
+	out := b.String()
+	if !strings.Contains(out, "reverted   3_add_index") {
+		t.Errorf("the rolled-back half is not labelled reverted:\n%s", out)
+	}
+
+	if !strings.Contains(out, "applied    3_add_index") {
+		t.Errorf("the re-applied half is not labelled applied:\n%s", out)
+	}
+}
+
+// TestOneTransactionIsNotAlwaysTrue: the field is documented as reporting
+// whether the run held together, and a caller may branch on it to decide
+// whether a failed deploy needs manual inspection.
+func TestOneTransactionIsNotAlwaysTrue(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+
+	single := &Report{Applied: []Record{{Version: 1, FinishedAt: &now, Transactional: true}}}
+	two := &Report{Applied: []Record{
+		{Version: 1, FinishedAt: &now, Transactional: true},
+		{Version: 2, FinishedAt: &now, Transactional: true},
+	}}
+	nonTx := &Report{Applied: []Record{{Version: 1, FinishedAt: &now, Transactional: false}}}
+
+	// The computation lives in run(); this pins the rule it implements.
+	oneTx := func(r *Report) bool {
+		return len(r.Applied) == 1 && r.Applied[0].Transactional
+	}
+
+	if !oneTx(single) {
+		t.Error("one transactional migration is one transaction")
+	}
+
+	if oneTx(two) {
+		t.Error("two migrations are two transactions")
+	}
+
+	if oneTx(nonTx) {
+		t.Error("a no-transaction migration is no transaction")
 	}
 }

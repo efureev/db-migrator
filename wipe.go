@@ -29,11 +29,17 @@ type Object struct {
 	// Schema and Name identify the object.
 	Schema string
 	Name   string
-	// Kind is "table", "view", "materialized view", "sequence", "routine" or
-	// "type".
+	// Kind is "table", "foreign table", "view", "materialized view",
+	// "sequence", "routine" or "type".
 	Kind string
 	// Reason says why it was kept; it is empty for an object that was dropped.
 	Reason string
+
+	// identity is what DROP is given. For most kinds it is the quoted qualified
+	// name; for a routine it is the signature, because a schema holding f(int)
+	// and f(text) has two rows both named "f" and DROP ROUTINE by bare name
+	// fails with 42725 — aborting the whole wipe transaction.
+	identity string
 }
 
 // String reports the object as it appears in output.
@@ -61,7 +67,12 @@ type WipeReport struct {
 
 // String reports a one-line summary.
 func (r *WipeReport) String() string {
-	return fmt.Sprintf("%d objects dropped, %d kept in %s", len(r.Dropped), len(r.Kept), r.Database)
+	verb := "dropped"
+	if r.DryRun {
+		verb = "would be dropped"
+	}
+
+	return fmt.Sprintf("%d objects %s, %d kept in %s", len(r.Dropped), verb, len(r.Kept), r.Database)
 }
 
 // systemSchemas are never touched, whatever the configuration says.
@@ -124,6 +135,22 @@ func (m *Migrator) Wipe(ctx context.Context, c Confirmation) (*WipeReport, error
 		return nil, err
 	}
 
+	if m.cfg.dryRun {
+		report.DryRun = true
+
+		for _, o := range objects {
+			if o.Reason != "" {
+				report.Kept = append(report.Kept, o)
+
+				continue
+			}
+
+			report.Dropped = append(report.Dropped, o)
+		}
+
+		return report, nil
+	}
+
 	tx, err := s.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("migrator: begin: %w", redact(err))
@@ -138,10 +165,7 @@ func (m *Migrator) Wipe(ctx context.Context, c Confirmation) (*WipeReport, error
 			continue
 		}
 
-		stmt := fmt.Sprintf("DROP %s IF EXISTS %s CASCADE",
-			dropKeyword(o.Kind), pgx.Identifier{o.Schema, o.Name}.Sanitize())
-
-		if _, err := tx.Exec(ctx, stmt); err != nil {
+		if _, err := tx.Exec(ctx, o.dropStatement()); err != nil {
 			return nil, fmt.Errorf("migrator: drop %s: %w", o, redact(err))
 		}
 
@@ -218,26 +242,43 @@ func (m *Migrator) confirmWipe(c Confirmation, database string) error {
 // dropping them would take the extension with them, which is exactly the
 // failure DROP SCHEMA CASCADE produces and this exists to avoid.
 func (m *Migrator) wipeTargets(ctx context.Context, s Session) ([]Object, error) {
+	// identity is what DROP is given, and it is not always the name. A routine
+	// must be dropped by signature: a schema holding f(int) and f(text) has two
+	// pg_proc rows both called "f", and DROP ROUTINE by bare name fails with
+	// 42725 — which, inside the single transaction a wipe runs in, discards
+	// every drop already issued and leaves the operator with nothing done and
+	// no way forward.
 	const q = `
 WITH ext AS (
   SELECT objid FROM pg_depend WHERE deptype = 'e'
 )
-SELECT kind, name, owned FROM (
-  -- tables, partitioned tables, foreign tables
-  SELECT 1 AS ord,
-         CASE c.relkind WHEN 'm' THEN 'materialized view' WHEN 'v' THEN 'view'
-                        WHEN 'S' THEN 'sequence' ELSE 'table' END AS kind,
+SELECT kind, name, identity, owned FROM (
+  -- ordinary and partitioned tables
+  SELECT 1 AS ord, 'table' AS kind,
          c.relname::text AS name,
+         format('%I.%I', n.nspname, c.relname) AS identity,
          pg_get_userbyid(c.relowner) = CURRENT_USER AS owned
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = $1 AND c.relkind IN ('r','p','f')
+   WHERE n.nspname = $1 AND c.relkind IN ('r','p')
      AND c.oid NOT IN (SELECT objid FROM ext)
 
   UNION ALL
 
-  SELECT 2, CASE c.relkind WHEN 'm' THEN 'materialized view' ELSE 'view' END,
-         c.relname::text, pg_get_userbyid(c.relowner) = CURRENT_USER
+  -- foreign tables need DROP FOREIGN TABLE; DROP TABLE is rejected outright
+  SELECT 2, 'foreign table', c.relname::text,
+         format('%I.%I', n.nspname, c.relname),
+         pg_get_userbyid(c.relowner) = CURRENT_USER
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = $1 AND c.relkind = 'f'
+     AND c.oid NOT IN (SELECT objid FROM ext)
+
+  UNION ALL
+
+  SELECT 3, CASE c.relkind WHEN 'm' THEN 'materialized view' ELSE 'view' END,
+         c.relname::text, format('%I.%I', n.nspname, c.relname),
+         pg_get_userbyid(c.relowner) = CURRENT_USER
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = $1 AND c.relkind IN ('m','v')
@@ -246,7 +287,8 @@ SELECT kind, name, owned FROM (
   UNION ALL
 
   -- sequences not owned by a column: those went with their table
-  SELECT 3, 'sequence', c.relname::text, pg_get_userbyid(c.relowner) = CURRENT_USER
+  SELECT 4, 'sequence', c.relname::text, format('%I.%I', n.nspname, c.relname),
+         pg_get_userbyid(c.relowner) = CURRENT_USER
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = $1 AND c.relkind = 'S'
@@ -256,7 +298,9 @@ SELECT kind, name, owned FROM (
 
   UNION ALL
 
-  SELECT 4, 'routine', p.proname::text, pg_get_userbyid(p.proowner) = CURRENT_USER
+  -- by signature, not by name: see the note above.
+  SELECT 5, 'routine', p.proname::text, p.oid::regprocedure::text,
+         pg_get_userbyid(p.proowner) = CURRENT_USER
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = $1 AND p.oid NOT IN (SELECT objid FROM ext)
@@ -265,7 +309,8 @@ SELECT kind, name, owned FROM (
 
   -- composite, enum, domain and range types, excluding the row types that
   -- belong to tables: those go with the table.
-  SELECT 5, 'type', t.typname::text, pg_get_userbyid(t.typowner) = CURRENT_USER
+  SELECT 6, 'type', t.typname::text, format('%I.%I', n.nspname, t.typname),
+         pg_get_userbyid(t.typowner) = CURRENT_USER
     FROM pg_type t
     JOIN pg_namespace n ON n.oid = t.typnamespace
    WHERE n.nspname = $1 AND t.typtype IN ('c','e','d','r')
@@ -285,15 +330,15 @@ ORDER BY ord, name`
 
 	for rows.Next() {
 		var (
-			kind, name string
-			owned      bool
+			kind, name, identity string
+			owned                bool
 		)
 
-		if err := rows.Scan(&kind, &name, &owned); err != nil {
+		if err := rows.Scan(&kind, &name, &identity, &owned); err != nil {
 			return nil, fmt.Errorf("migrator: enumerate objects to wipe: %w", redact(err))
 		}
 
-		o := Object{Schema: m.cfg.schema, Name: name, Kind: kind}
+		o := Object{Schema: m.cfg.schema, Name: name, Kind: kind, identity: identity}
 		if !owned {
 			// Reported rather than attempted: a wipe that dies halfway through
 			// on somebody else's table is worse than one that says which
@@ -311,11 +356,23 @@ ORDER BY ord, name`
 	return out, nil
 }
 
+// dropStatement reports the statement that removes this object.
+func (o Object) dropStatement() string {
+	target := o.identity
+	if target == "" {
+		target = pgx.Identifier{o.Schema, o.Name}.Sanitize()
+	}
+
+	return "DROP " + dropKeyword(o.Kind) + " IF EXISTS " + target + " CASCADE"
+}
+
 // dropKeyword reports the DROP statement for an object kind.
 func dropKeyword(kind string) string {
 	switch kind {
 	case "materialized view":
 		return "MATERIALIZED VIEW"
+	case "foreign table":
+		return "FOREIGN TABLE"
 	case "view":
 		return "VIEW"
 	case "sequence":
