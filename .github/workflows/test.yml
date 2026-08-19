@@ -98,7 +98,7 @@ jobs:
 
       - name: Артефакты упавших тестов
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-artifacts-pg${{ matrix.postgres }}
           path: ${{ runner.temp }}/**/artifacts/**
