@@ -64,7 +64,7 @@ func Run(args []string, streams Streams) int {
 
 	// The UI may not exist yet when the failure is in parsing, so the fallback
 	// writes plainly rather than not at all.
-	fmt.Fprintln(streams.Err, "migrator: "+err.Error())
+	fmt.Fprintln(streams.Err, ui.Prefixed(err.Error()))
 
 	return ExitCode(err)
 }

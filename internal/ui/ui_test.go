@@ -183,3 +183,23 @@ func TestLoggerIsUsable(t *testing.T) {
 		t.Error("the streams are not exposed")
 	}
 }
+
+// TestPrefixedNamesTheProgramOnce: library errors carry "migrator: " already,
+// because that is what an error from a Go package looks like in godoc and in a
+// caller's own log. The terminal wants the name once.
+func TestPrefixedNamesTheProgramOnce(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"migrator: the journal table belongs to another tool": "migrator: the journal table belongs to another tool",
+		`unknown command "nope"`:                              `migrator: unknown command "nope"`,
+		"":                                                    "migrator: ",
+		"migratory birds":                                     "migrator: migratory birds",
+	}
+
+	for in, want := range cases {
+		if got := Prefixed(in); got != want {
+			t.Errorf("Prefixed(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

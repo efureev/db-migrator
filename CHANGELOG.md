@@ -46,6 +46,23 @@ doing while they run.
   `WithProgress`, `WithProgressInterval`, `--progress-interval` and
   `MIGRATOR_PROGRESS_INTERVAL`.
 
+- **`docs/usecases` — nine tasks walked end to end**, in English and Russian:
+  a first project, adopting an existing database, making a schema change safely,
+  watching a long migration, CI and deploy, rolling back and repairing, guards in
+  production, many schemas, and using it as a library. Every transcript in them
+  was produced by running the tool against a live PostgreSQL rather than written
+  by hand, because a documented output that never existed is how documentation
+  starts lying.
+
+### Fixed
+
+- **Errors printed the program's name twice.** Library errors are prefixed
+  "migrator: " because that is what an error from a Go package looks like in
+  godoc and in a caller's own log, and the terminal added a second one:
+  `migrator: migrator: the journal table belongs to another tool`. It read like
+  a bug in the tool at the exact moment the reader was deciding whether to trust
+  it.
+
 - **`migrator up --dry-run` predicts the locks.** Every statement is classified:
   which lock it takes, whether it rewrites the table, whether it scans it, and
   how many rows are in the table it is about to hold.

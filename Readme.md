@@ -171,6 +171,23 @@ An unrecognised directive is an error, not a warning: a mistyped
 fails with SQLSTATE 25001 if you are lucky and holds a lock across the whole
 migration if you are not.
 
+## Use cases
+
+Each task walked end to end, with real commands and their real output:
+**[docs/usecases](docs/usecases/Readme.md)**.
+
+| I want to… | Page |
+|---|---|
+| set this up on an empty database | [Starting a new project](docs/usecases/first-project.md) |
+| point it at a database that already has a schema | [Adopting an existing database](docs/usecases/adopt-existing-database.md) |
+| know what a migration will lock before it locks it | [Making a schema change safely](docs/usecases/safe-schema-change.md) |
+| see whether a 20-minute migration is stuck | [Watching a long migration](docs/usecases/watching-a-long-migration.md) |
+| wire it into CI and a deploy | [In CI and in a deploy](docs/usecases/ci-and-deploy.md) |
+| undo something, or fix a journal | [Rolling back, and repairing](docs/usecases/rollback-and-repair.md) |
+| decide what it may do in production | [Guards in production](docs/usecases/production-guards.md) |
+| run one set of files against many schemas | [One set, many schemas](docs/usecases/many-schemas.md) |
+| have a service migrate itself at startup | [Using it as a library](docs/usecases/library.md) |
+
 ## Commands
 
 | Command | What it does |

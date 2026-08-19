@@ -225,7 +225,26 @@ func (u *UI) Error(err error) {
 		return
 	}
 
-	fmt.Fprintln(u.errw, "migrator: "+err.Error())
+	fmt.Fprintln(u.errw, Prefixed(err.Error()))
+}
+
+// Prefixed puts the program's name in front of a message, unless the message
+// already carries it.
+//
+// Errors from the library are prefixed "migrator: " because that is what an
+// error from a Go package looks like everywhere else — in godoc, in a caller's
+// own log. A terminal wants the name once. Adding it unconditionally produced
+// "migrator: migrator: the journal table belongs to another tool", which reads
+// like a bug in the tool at the exact moment the reader is deciding whether to
+// trust it.
+func Prefixed(msg string) string {
+	const name = "migrator: "
+
+	if strings.HasPrefix(msg, name) {
+		return msg
+	}
+
+	return name + msg
 }
 
 // Renderable is anything this program can show, in either shape.
