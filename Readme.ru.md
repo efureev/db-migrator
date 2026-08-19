@@ -163,8 +163,8 @@ make test-integration  # интеграционные тесты поверх н
 make coverage          # пороги покрытия по пакетам
 ```
 
-См. [CONTRIBUTING.md](CONTRIBUTING.md), [UPGRADE.md](UPGRADE.md) и
-[docs/ROADMAP.md](docs/ROADMAP.md) — куда инструмент идёт и чего делать не будет.
+См. [CONTRIBUTING.md](CONTRIBUTING.md) и [UPGRADE.md](UPGRADE.md).
+[CHANGELOG.md](CHANGELOG.md) — что менялось в каждом релизе и почему.
 
 ## Лицензия
 

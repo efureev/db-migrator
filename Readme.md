@@ -230,8 +230,8 @@ integration level that requires a real PostgreSQL, and an `e2e` package that
 runs the built binary as a subprocess. The integration level refuses to skip
 itself in CI: a silently skipped level looks exactly like a green run.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [UPGRADE.md](UPGRADE.md) and
-[docs/ROADMAP.md](docs/ROADMAP.md) — where this is going, and what it will not become.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [UPGRADE.md](UPGRADE.md).
+[CHANGELOG.md](CHANGELOG.md) says what each release changed and why.
 
 ## License
 

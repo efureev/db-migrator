@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -656,7 +658,7 @@ character that needed escaping.
 var versionCmd = command{
 	name: "version", summary: "print the version of this binary",
 	usage: func(w io.Writer) {
-		fmt.Fprint(w, `migrator version
+		fmt.Fprint(w, `migrator version [--json]
 
 Prints the version of the binary. The version of the schema is a different
 question, and "migrator status --current" answers it — version 1 used one word
@@ -664,6 +666,27 @@ for both, which was ambiguous every time somebody asked.
 `)
 	},
 	run: func(e *env, _ []string) error {
+		if e.ui.JSON() {
+			// A release pipeline that has just published a binary asks it what it
+			// thinks it is, and compares that with the tag. Making it parse the
+			// human sentence would be asking for a regex over prose.
+			enc := json.NewEncoder(e.ui.Out())
+			enc.SetIndent("", "  ")
+
+			return enc.Encode(struct {
+				Format   int    `json:"format"`
+				Version  string `json:"version"`
+				Commit   string `json:"commit"`
+				Date     string `json:"date"`
+				Go       string `json:"go"`
+				Platform string `json:"platform"`
+			}{
+				Format:  migrator.JSONFormat,
+				Version: buildinfo.Version(), Commit: buildinfo.Commit(), Date: buildinfo.Date(),
+				Go: runtime.Version(), Platform: runtime.GOOS + "/" + runtime.GOARCH,
+			})
+		}
+
 		e.ui.Answer("%s\n", buildinfo.Long())
 
 		return nil

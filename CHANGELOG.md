@@ -2,7 +2,31 @@
 
 Keep a Changelog, SemVer.
 
-## [2.0.0] — unreleased
+## [2.0.1] — 2026-08-19
+
+2.0.0 shipped without its own command. Install it and there was nothing to run.
+
+### Fixed
+
+- **`cmd/migrator` was missing from the 2.0.0 tag**, so
+  `go install github.com/efureev/db-migrator/v2/cmd/migrator@v2.0.0` fails with
+  "found, but does not contain package", and both release jobs failed while
+  building it. The cause was one line in `.gitignore`: `migrator`, meant for the
+  binary a plain `go build` drops in the root. A pattern without a leading slash
+  matches every path component, so it also matched `cmd/migrator/`. It is now
+  `/migrator`.
+
+  Nothing local could have caught it: the compiler, the linter and the tests all
+  read the working tree, where the file was present. Only git disagreed, and
+  nobody was asking git. `TestNoGoFileIsIgnored` now asks, on every run.
+
+  **2.0.0 cannot be repaired.** A version in the module proxy is immutable, so
+  it stays broken and 2.0.1 is the first usable release of the 2.x line.
+- **`migrator version --json` ignored the flag** and printed the human sentence.
+  It now writes the same `"format": 1` object shape as every other command, with
+  the version, commit, build date, Go version and platform.
+
+## [2.0.0] — 2026-08-19 (broken, do not use)
 
 A rewrite. Nothing is shared with 1.x except the idea.
 

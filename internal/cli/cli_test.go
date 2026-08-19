@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -309,6 +310,39 @@ func TestVersionCommand(t *testing.T) {
 
 	if !strings.Contains(out.String(), "migrator") {
 		t.Errorf("version wrote %q", out.String())
+	}
+}
+
+// TestVersionCommandJSON keeps the machine-readable form honest. A release
+// pipeline compares what the binary says with the tag it was built from, and
+// the human sentence is prose — the JSON object is the contract.
+func TestVersionCommandJSON(t *testing.T) {
+	t.Parallel()
+
+	var out, errw bytes.Buffer
+
+	code := Run([]string{"version", "--json"}, Streams{In: strings.NewReader(""), Out: &out, Err: &errw})
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stderr %q", code, errw.String())
+	}
+
+	var got struct {
+		Format   int    `json:"format"`
+		Version  string `json:"version"`
+		Go       string `json:"go"`
+		Platform string `json:"platform"`
+	}
+
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("version --json wrote something that is not JSON: %v\n%s", err, out.String())
+	}
+
+	if got.Format != migrator.JSONFormat {
+		t.Errorf("format = %d, want %d", got.Format, migrator.JSONFormat)
+	}
+
+	if got.Version == "" || got.Go == "" || got.Platform == "" {
+		t.Errorf("version --json left a field empty: %+v", got)
 	}
 }
 
