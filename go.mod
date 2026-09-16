@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/efureev/envi/v2 v2.3.0
 	github.com/efureev/reggol v1.2.2
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 )
 
 require (
