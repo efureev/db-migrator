@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # Версия тулчейна берётся из go.mod и нигде не дублируется числом.
           go-version-file: go.mod
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - run: go mod tidy
       - name: go.mod и go.sum не должны меняться
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - run: go build ./...
       - run: go test -race -shuffle=on ./...
@@ -81,7 +81,7 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - name: Интеграционные тесты
         env:
@@ -98,7 +98,7 @@ jobs:
 
       - name: Артефакты упавших тестов
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-artifacts-pg${{ matrix.postgres }}
           path: ${{ runner.temp }}/**/artifacts/**
@@ -109,6 +109,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

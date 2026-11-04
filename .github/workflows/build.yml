@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 } # git describe needs the tags
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
 
       - name: Build every platform
@@ -41,7 +41,7 @@ jobs:
             *unknown*) echo "the binary does not know its version"; exit 1 ;;
           esac
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries
           path: build/
@@ -59,8 +59,8 @@ jobs:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v3
         with:
@@ -70,7 +70,14 @@ jobs:
 
       - name: Read the toolchain version from go.mod
         id: go
-        run: echo "version=$(awk '/^go /{print $2}' go.mod)" >> "$GITHUB_OUTPUT"
+        # The toolchain line wins, as it does for setup-go in every other job. The
+        # go line is the floor this library imposes on its consumers and stays low
+        # on purpose, so an image built from it would ship a standard library
+        # without the fixes. `go mod tidy` drops the toolchain line once it equals
+        # the go line, hence the fallback.
+        run: |
+          version=$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)
+          echo "version=${version:-$(awk '$1 == "go" { print $2 }' go.mod)}" >> "$GITHUB_OUTPUT"
 
       - id: meta
         run: |
@@ -78,7 +85,7 @@ jobs:
           echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Distroless image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: distroless
@@ -94,7 +101,7 @@ jobs:
             ghcr.io/efureev/migrator:latest
 
       - name: Alpine image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: shell
