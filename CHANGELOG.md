@@ -4,6 +4,14 @@ Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A tag publishes its binaries again.** The release workflow uploaded them to
+  a GitHub release that nothing had created, so it failed at that step for
+  v2.0.1, v2.1.0 and v2.1.1, and those versions have no binaries on the releases
+  page. The workflow now creates the release when there is none; one made by
+  hand beforehand keeps its notes.
+
 ### Security
 
 - **pgx 5.12.0.** With 5.10.0, a connection relying on `require_auth` or
