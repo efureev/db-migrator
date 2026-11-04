@@ -50,7 +50,17 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${GITHUB_REF_NAME}" build/* --clobber
+        # Pushing a tag is the whole release procedure, so normally nothing has
+        # created the release yet: v2.0.1, v2.1.0 and v2.1.1 all failed on a bare
+        # `gh release upload` with "release not found". Creating it with the files
+        # keeps it a draft until they are all up, so nobody downloads half a
+        # release. One made by hand beforehand keeps its notes.
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" build/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" build/* --verify-tag --generate-notes
+          fi
 
   image:
     name: Image
