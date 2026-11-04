@@ -271,7 +271,7 @@ docker run --rm \
   -e MIGRATOR_DSN='postgres://app:secret@db:5432/shop?sslmode=disable' \
   -e MIGRATOR_ENV=production \
   -v "$PWD/migrations:/migrations:ro" \
-  ghcr.io/efureev/migrator:2 up
+  ghcr.io/efureev/migrator:v2.1.2 up
 ```
 
 Distroless, running as user 65532. `:ro` on the migrations is enough for

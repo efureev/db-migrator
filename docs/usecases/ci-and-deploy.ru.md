@@ -154,7 +154,7 @@ docker run --rm \
   -e MIGRATOR_DSN='postgres://app:secret@db:5432/shop?sslmode=disable' \
   -e MIGRATOR_ENV=production \
   -v "$PWD/migrations:/migrations" \
-  ghcr.io/efureev/migrator:2 up
+  ghcr.io/efureev/migrator:v2.1.2 up
 ```
 
 `MIGRATOR_ENV=production` включает защиты из
