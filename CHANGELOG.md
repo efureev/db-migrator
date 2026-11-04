@@ -2,7 +2,10 @@
 
 Keep a Changelog, SemVer.
 
-## [Unreleased]
+## [2.1.2] — 2026-11-04
+
+A security release: the pgx it requires and the Go it is built with both carry
+fixes.
 
 ### Fixed
 
@@ -26,10 +29,9 @@ Keep a Changelog, SemVer.
   code. The fix is a `toolchain` line: the `go` line, which is the floor imposed
   on library consumers, stays at 1.26.0.
 
-## [2.1.0] — unreleased
+## [2.1.1] — 2026-08-19
 
-Migrations now say what they will lock before they run, and say what they are
-doing while they run.
+Migrations now say what they are doing while they run.
 
 ### Added
 
@@ -86,6 +88,12 @@ doing while they run.
   `migrator: migrator: the journal table belongs to another tool`. It read like
   a bug in the tool at the exact moment the reader was deciding whether to trust
   it.
+
+## [2.1.0] — 2026-08-19
+
+Migrations now say what they will lock before they run.
+
+### Added
 
 - **`migrator up --dry-run` predicts the locks.** Every statement is classified:
   which lock it takes, whether it rewrites the table, whether it scans it, and
