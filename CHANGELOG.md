@@ -2,6 +2,22 @@
 
 Keep a Changelog, SemVer.
 
+## [Unreleased]
+
+### Security
+
+- **pgx 5.12.0.** With 5.10.0, a connection relying on `require_auth` or
+  `channel_binding=require` without verifying the server's certificate could be
+  accepted by an impersonating server that skipped authentication
+  (GHSA-95fj-3fxw-g62g). The same release closes an SQL injection in
+  simple-protocol batches (GHSA-j38q-h3ph-jjpq). The migrator sends no batches,
+  but a library consumer inherits this requirement along with everything else.
+
+- **Binaries and images build on Go 1.26.10 rather than 1.26.0**, in which
+  `govulncheck` found 16 standard library vulnerabilities reachable from this
+  code. The fix is a `toolchain` line: the `go` line, which is the floor imposed
+  on library consumers, stays at 1.26.0.
+
 ## [2.1.0] — unreleased
 
 Migrations now say what they will lock before they run, and say what they are
@@ -106,20 +122,6 @@ to see what was actually taken. Where the two disagreed, PostgreSQL was right.
 It is still a heuristic over statement text — it cannot see triggers, rules,
 inheritance, or the queue in front of the lock — and the documentation says so
 rather than promising more.
-
-### Security
-
-- **pgx 5.12.0.** With 5.10.0, a connection relying on `require_auth` or
-  `channel_binding=require` without verifying the server's certificate could be
-  accepted by an impersonating server that skipped authentication
-  (GHSA-95fj-3fxw-g62g). The same release closes an SQL injection in
-  simple-protocol batches (GHSA-j38q-h3ph-jjpq). The migrator sends no batches,
-  but a library consumer inherits this requirement along with everything else.
-
-- **Binaries and images build on Go 1.26.10 rather than 1.26.0**, in which
-  `govulncheck` found 16 standard library vulnerabilities reachable from this
-  code. The fix is a `toolchain` line: the `go` line, which is the floor imposed
-  on library consumers, stays at 1.26.0.
 
 ## [2.0.1] — 2026-08-19
 
