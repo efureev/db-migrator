@@ -7,7 +7,7 @@ toolchain go1.26.10
 require (
 	github.com/efureev/envi/v2 v2.3.0
 	github.com/efureev/reggol v1.2.2
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 )
 
 require (
